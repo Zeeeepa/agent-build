@@ -160,6 +160,13 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
         });
     }
 
+    // spawn non-blocking version check
+    tokio::spawn(async {
+        if let Err(e) = edda_mcp::version_check::check_for_updates().await {
+            tracing::debug!("Version check failed: {}", e);
+        }
+    });
+
     // initialize all available providers
     let databricks = DatabricksProvider::new().ok();
     let deployment = if config.allow_deployment {
