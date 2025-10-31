@@ -5,6 +5,9 @@ on:
     workflows: ["Rust"]
     types:
       - completed
+    branches:
+      - main
+      - '**'  # Allow on all branches (will be filtered by release conditions)
 
 permissions:
   contents: write
