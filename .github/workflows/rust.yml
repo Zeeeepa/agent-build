@@ -94,12 +94,12 @@ jobs:
 
             # Check if Cargo.toml in changed files
             if gh pr diff $PR_NUM --name-only | grep -q "edda/edda_mcp/Cargo.toml"; then
-              # Check if any commit has [release] keyword
-              if gh pr view $PR_NUM --json commits --jq '.commits[].messageHeadline' | grep -q "\[release\]"; then
+              # Check if the latest commit has [release] keyword
+              if [[ "${{ github.event.head_commit.message }}" == *"[release]"* ]]; then
                 should_build="true"
-                echo "Rust build detected: Cargo.toml change + [release] keyword in PR"
+                echo "Rust build detected: Cargo.toml change + [release] keyword in latest commit"
               else
-                echo "Cargo.toml changed but no [release] keyword - skipping build"
+                echo "Cargo.toml changed but no [release] keyword in latest commit - skipping build"
               fi
             fi
           fi
@@ -218,11 +218,10 @@ jobs:
               should_release="true"
               echo "Release detected: Cargo.toml change on main"
             elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              # For PRs, check for [release] keyword
-              PR_NUM=${{ github.event.pull_request.number }}
-              if gh pr view $PR_NUM --json commits --jq '.commits[].messageHeadline' | grep -q "\[release\]"; then
+              # For PRs, check for [release] keyword in latest commit
+              if [[ "${{ github.event.head_commit.message }}" == *"[release]"* ]]; then
                 should_release="true"
-                echo "Release detected: Cargo.toml change + [release] keyword in PR"
+                echo "Release detected: Cargo.toml change + [release] keyword in latest commit"
               fi
             fi
           fi
