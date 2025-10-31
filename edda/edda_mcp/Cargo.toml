@@ -1,6 +1,6 @@
 [package]
 name = "edda_mcp"
-version = "0.1.0"
+version = "0.0.3-dev.1"
 edition = "2024"
 
 [[bin]]
@@ -30,6 +30,8 @@ flate2 = "1.0"
 dialoguer = "0.11"
 dirs = "5.0"
 sha2 = "0.10"
+reqwest = { version = "0.12", features = ["json"] }
+semver = "1.0"
 
 # internal dependencies
 edda_integrations = { path = "../edda_integrations" }
