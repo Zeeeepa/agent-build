@@ -74,13 +74,10 @@ jobs:
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
       - name: Check if release build needed
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           should_build="false"
 
@@ -90,8 +87,12 @@ jobs:
             echo "Rust build detected: push to main branch"
           elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
             # For PRs: check if edda_mcp Cargo.toml changed AND has [release] keyword
-            if git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -q "edda/edda_mcp/Cargo.toml"; then
-              if git log --format=%B origin/${{ github.base_ref }}..HEAD | grep -q "\[release\]"; then
+            PR_NUM=${{ github.event.pull_request.number }}
+
+            # Check if Cargo.toml in changed files
+            if gh pr diff $PR_NUM --name-only | grep -q "edda/edda_mcp/Cargo.toml"; then
+              # Check if any commit has [release] keyword
+              if gh pr view $PR_NUM --json commits --jq '.commits[].messageHeadline' | grep -q "\[release\]"; then
                 should_build="true"
                 echo "Rust build detected: Cargo.toml change + [release] keyword in PR"
               else
