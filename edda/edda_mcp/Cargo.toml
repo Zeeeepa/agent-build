@@ -1,6 +1,6 @@
 [package]
 name = "edda_mcp"
-version = "0.0.3-dev.2"
+version = "0.0.4"
 edition = "2024"
 
 [[bin]]
