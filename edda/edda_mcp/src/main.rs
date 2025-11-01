@@ -136,6 +136,7 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
                 .open(&log_path_buf)?;
 
             tracing_subscriber::fmt()
+                .with_ansi(false)
                 .with_writer(move || log_file.try_clone().unwrap())
                 .init();
 
