@@ -1,4 +1,8 @@
 use rust_embed::Embed;
+pub mod local;
+pub mod template;
+pub use local::LocalTemplate;
+pub use template::{Template, TemplateCore};
 
 #[derive(Embed)]
 #[folder = "template_trpc"]
@@ -11,8 +15,8 @@ use rust_embed::Embed;
 #[exclude = "**/.DS_Store"]
 pub struct TemplateTRPC;
 
-impl TemplateTRPC {
-    pub fn guidelines() -> &'static str {
-        include_str!("../template_trpc/CLAUDE.md")
+impl Template for TemplateTRPC {
+    fn name(&self) -> String {
+        "tRPC TypeScript".to_string()
     }
 }

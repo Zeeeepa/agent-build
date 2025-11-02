@@ -7,7 +7,7 @@ pub mod workspace;
 pub use databricks::DatabricksProvider;
 pub use deployment::DeploymentProvider;
 pub use google_sheets::GoogleSheetsProvider;
-pub use io::{IOProvider, Template};
+pub use io::IOProvider;
 pub use workspace::WorkspaceTools;
 
 use crate::session::SessionContext;
@@ -57,7 +57,12 @@ impl CombinedProvider {
         io: Option<IOProvider>,
         workspace: Option<WorkspaceTools>,
     ) -> Result<Self> {
-        if databricks.is_none() && deployment.is_none() && google_sheets.is_none() && io.is_none() && workspace.is_none() {
+        if databricks.is_none()
+            && deployment.is_none()
+            && google_sheets.is_none()
+            && io.is_none()
+            && workspace.is_none()
+        {
             return Err(eyre::eyre!("at least one provider must be available"));
         }
         Ok(Self {
@@ -111,7 +116,10 @@ impl CombinedProvider {
 
         // check workspace tools
         if let Some(workspace) = self.workspace.clone() {
-            if matches!(tool_name, "read_file" | "write_file" | "edit_file" | "bash" | "grep" | "glob") {
+            if matches!(
+                tool_name,
+                "read_file" | "write_file" | "edit_file" | "bash" | "grep" | "glob"
+            ) {
                 return Ok(TargetProvider::Workspace(workspace));
             }
         }
@@ -171,7 +179,9 @@ impl CombinedProvider {
                 }
                 ProviderType::Workspace => {
                     if self.workspace.is_none() {
-                        return Err(eyre::eyre!("Workspace provider is required but not configured."));
+                        return Err(eyre::eyre!(
+                            "Workspace provider is required but not configured."
+                        ));
                     }
                 }
             }
