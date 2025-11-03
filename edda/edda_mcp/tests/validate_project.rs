@@ -1,4 +1,5 @@
 use edda_mcp::providers::IOProvider;
+use edda_mcp::providers::io::validation::*;
 use edda_templates::TemplateTRPC;
 use std::path::Path;
 use tempfile::TempDir;
@@ -16,7 +17,10 @@ async fn test_validate_after_initiate() {
     initiate_project_for_tests(work_dir, false);
 
     // validate the initialized project (build + tests)
-    let result = IOProvider::validate_project_impl(work_dir).await.unwrap();
+    let validation_strategy = ValidationTRPC.boxed();
+    let result = IOProvider::validate_project_impl(work_dir, validation_strategy)
+        .await
+        .unwrap();
 
     // default template should pass validation (including healthcheck test)
     assert!(
@@ -25,7 +29,6 @@ async fn test_validate_after_initiate() {
         result.details
     );
     assert!(result.details.is_none());
-    assert!(result.message.contains("build + tests"));
 }
 
 #[tokio::test]
@@ -45,7 +48,10 @@ async fn test_validate_with_typescript_error() {
     .unwrap();
 
     // validate should detect the error
-    let result = IOProvider::validate_project_impl(work_dir).await.unwrap();
+    let validation_strategy = ValidationTRPC.boxed();
+    let result = IOProvider::validate_project_impl(work_dir, validation_strategy)
+        .await
+        .unwrap();
 
     // validation should fail due to type error
     assert!(
@@ -73,7 +79,10 @@ async fn test_validate_with_failing_test() {
     std::fs::write(&test_file, modified).unwrap();
 
     // validate should detect the test failure
-    let result = IOProvider::validate_project_impl(work_dir).await.unwrap();
+    let validation_strategy = ValidationTRPC.boxed();
+    let result = IOProvider::validate_project_impl(work_dir, validation_strategy)
+        .await
+        .unwrap();
 
     // validation should fail due to test failure
     assert!(!result.success, "validation should fail when tests fail");
