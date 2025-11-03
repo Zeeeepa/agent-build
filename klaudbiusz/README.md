@@ -10,13 +10,27 @@ Klaudbiusz generates production-ready Databricks applications from natural langu
 
 ## Quick Start
 
+### Setup Environment
+
+Create a `.env` file in the `klaudbiusz/` directory (copy from `.env.example`):
+
+```bash
+cd klaudbiusz
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+`.env` file contents:
+```bash
+DATABRICKS_HOST=https://your-workspace.databricks.com
+DATABRICKS_TOKEN=dapi...
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
 ### Generate Applications
 
 ```bash
 cd klaudbiusz
-export DATABRICKS_HOST=https://your-workspace.databricks.com
-export DATABRICKS_TOKEN=dapi...
-export ANTHROPIC_API_KEY=sk-ant-...
 
 # Generate a single app
 uv run cli/main.py "Create a customer churn analysis dashboard"
@@ -28,16 +42,22 @@ uv run cli/bulk_run.py
 ### Evaluate Generated Apps
 
 ```bash
-cd cli
-export DATABRICKS_HOST=https://your-workspace.databricks.com
-export DATABRICKS_TOKEN=dapi...
+cd klaudbiusz
 
 # Evaluate all apps
-python3 evaluate_all.py
+uv run python cli/evaluate_all.py
+
+# Partial evaluation (filter apps)
+uv run python cli/evaluate_all.py --limit 5                    # First 5 apps
+uv run python cli/evaluate_all.py --apps app1 app2             # Specific apps
+uv run python cli/evaluate_all.py --pattern "customer*"        # Pattern matching
+uv run python cli/evaluate_all.py --skip 10 --limit 5          # Skip first 10, evaluate next 5
 
 # Evaluate single app
-python3 evaluate_app.py ../app/customer-churn-analysis
+uv run cli/evaluate_app.py ../app/customer-churn-analysis
 ```
+
+**Results are automatically logged to MLflow:** Navigate to `ML → Experiments → /Shared/klaudbiusz-evaluations` in Databricks UI.
 
 ## Evaluation Framework
 
@@ -51,6 +71,15 @@ We use **9 objective metrics** to measure autonomous deployability:
 | **Agentic DevX** | Local Runability, Deployability | 3.0/5, 3.0/5 |
 
 **See [eval-docs/evals.md](eval-docs/evals.md) for complete metric definitions.**
+
+### MLflow Integration
+
+**Track evaluation quality over time** using Databricks Managed MLflow:
+
+- 📊 **Automatic Tracking**: Every evaluation run logged to MLflow
+- 📈 **Metrics Trends**: Monitor success rates, quality scores, cost efficiency
+- 🔍 **Run Comparison**: Compare evaluation runs and track improvements
+- 📦 **Artifacts**: All reports automatically saved and versioned
 
 ### Key Innovation: Agentic DevX
 
@@ -132,14 +161,29 @@ shasum -a 256 -c klaudbiusz_evaluation_*.tar.gz.sha256
 
 ## Environment Variables
 
+**Recommended:** Use a `.env` file in the `klaudbiusz/` directory:
+
 ```bash
-# Required for generation
+# Required for generation and MLflow tracking
+DATABRICKS_HOST=https://your-workspace.databricks.com
+DATABRICKS_TOKEN=dapi...
+ANTHROPIC_API_KEY=sk-ant-...
+MLFLOW_EXPERIMENT_NAME=/Shared/klaudbiusz-evaluations
+
+# Optional for logging
+DATABASE_URL=postgresql://...
+```
+
+All scripts automatically load `.env` if present. Copy `.env.example` to get started:
+```bash
+cp .env.example .env
+```
+
+Alternatively, you can export environment variables manually:
+```bash
 export DATABRICKS_HOST=https://your-workspace.databricks.com
 export DATABRICKS_TOKEN=dapi...
 export ANTHROPIC_API_KEY=sk-ant-...
-
-# Optional for logging
-export DATABASE_URL=postgresql://...
 ```
 
 ## Core Principle

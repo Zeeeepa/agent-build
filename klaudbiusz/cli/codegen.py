@@ -82,6 +82,7 @@ class GenerationMetrics(TypedDict):
     input_tokens: int
     output_tokens: int
     turns: int
+    generation_time_sec: NotRequired[float]
     app_dir: NotRequired[str | None]
 
 
@@ -192,6 +193,9 @@ class AppBuilder:
             logger.info(mcp_msg)
 
     async def run_async(self, prompt: str) -> GenerationMetrics:
+        import time
+        start_time = time.time()
+
         self._setup_logging()
         await self.tracker.init()
         self.run_id = uuid4()
@@ -295,11 +299,13 @@ Use up to 10 tools per call to speed up the process.\n"""
                         # we've already checked that total_cost_usd and usage are not None
                         assert msg.total_cost_usd is not None
                         assert msg.usage is not None
+                        generation_time_sec = time.time() - start_time
                         metrics = {
                             "cost_usd": msg.total_cost_usd,
                             "input_tokens": msg.usage.get("input_tokens", 0),
                             "output_tokens": msg.usage.get("output_tokens", 0),
                             "turns": msg.num_turns,
+                            "generation_time_sec": generation_time_sec,
                             "app_dir": self.app_dir,
                         }
                     case _:

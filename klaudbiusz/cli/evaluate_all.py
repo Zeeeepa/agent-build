@@ -6,9 +6,15 @@ Runs lightweight evaluation on all apps and generates a comprehensive report.
 
 Usage:
     python evaluate_all.py
-    python evaluate_all.py --output report.json
+    python evaluate_all.py --apps app1 app2 app3
+    python evaluate_all.py --pattern "customer*"
+    python evaluate_all.py --limit 5
+    python evaluate_all.py --skip 10
+    python evaluate_all.py --start-from app5
 """
 
+import argparse
+import fnmatch
 import json
 import os
 import subprocess
@@ -787,8 +793,108 @@ def generate_csv_report(results: list[dict]) -> str:
     return output.getvalue()
 
 
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Evaluate generated apps with 9 objective metrics",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python evaluate_all.py                          # Evaluate all apps
+  python evaluate_all.py --apps app1 app2         # Evaluate specific apps
+  python evaluate_all.py --pattern "customer*"    # Evaluate apps matching pattern
+  python evaluate_all.py --limit 5                # Evaluate first 5 apps
+  python evaluate_all.py --skip 10                # Skip first 10 apps
+  python evaluate_all.py --start-from app5        # Start from specific app
+  python evaluate_all.py --limit 10 --skip 5      # Evaluate 10 apps starting from 6th
+        """
+    )
+
+    filter_group = parser.add_argument_group('app filtering')
+    filter_group.add_argument(
+        '--apps',
+        nargs='+',
+        metavar='APP',
+        help='Specific app names to evaluate'
+    )
+    filter_group.add_argument(
+        '--pattern',
+        metavar='PATTERN',
+        help='Glob pattern to match app names (e.g., "customer*")'
+    )
+    filter_group.add_argument(
+        '--limit',
+        type=int,
+        metavar='N',
+        help='Limit evaluation to first N apps (after skip/start-from)'
+    )
+    filter_group.add_argument(
+        '--skip',
+        type=int,
+        metavar='N',
+        help='Skip first N apps'
+    )
+    filter_group.add_argument(
+        '--start-from',
+        metavar='APP',
+        dest='start_from',
+        help='Start evaluation from this app (inclusive)'
+    )
+
+    return parser.parse_args()
+
+
+def filter_app_dirs(app_dirs: list[Path], args) -> list[Path]:
+    """Filter app directories based on command-line arguments."""
+    filtered = app_dirs
+
+    # Filter by specific app names
+    if args.apps:
+        app_names = set(args.apps)
+        filtered = [d for d in filtered if d.name in app_names]
+        if not filtered:
+            print(f"Warning: No apps found matching names: {', '.join(args.apps)}")
+            sys.exit(1)
+
+    # Filter by pattern
+    if args.pattern:
+        filtered = [d for d in filtered if fnmatch.fnmatch(d.name, args.pattern)]
+        if not filtered:
+            print(f"Warning: No apps found matching pattern: {args.pattern}")
+            sys.exit(1)
+
+    # Start from specific app
+    if args.start_from:
+        start_idx = None
+        for i, d in enumerate(filtered):
+            if d.name == args.start_from:
+                start_idx = i
+                break
+
+        if start_idx is None:
+            print(f"Warning: App '{args.start_from}' not found")
+            sys.exit(1)
+
+        filtered = filtered[start_idx:]
+
+    # Skip first N apps
+    if args.skip:
+        if args.skip >= len(filtered):
+            print(f"Warning: --skip {args.skip} is >= total apps ({len(filtered)})")
+            sys.exit(1)
+        filtered = filtered[args.skip:]
+
+    # Limit to first N apps
+    if args.limit:
+        filtered = filtered[:args.limit]
+
+    return filtered
+
+
 def main():
     """Main entry point."""
+    args = parse_args()
+
     script_dir = Path(__file__).parent
     apps_dir = script_dir.parent / "app"
 
@@ -800,9 +906,22 @@ def main():
     prompts, gen_metrics = load_prompts_and_metrics_from_bulk_run()
 
     # Get all app directories
-    app_dirs = [d for d in sorted(apps_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+    all_app_dirs = [d for d in sorted(apps_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
 
-    print(f"🔍 Evaluating {len(app_dirs)} apps...")
+    # Filter based on command-line arguments
+    app_dirs = filter_app_dirs(all_app_dirs, args)
+
+    print(f"🔍 Evaluating {len(app_dirs)} apps (out of {len(all_app_dirs)} total)...")
+    if args.apps:
+        print(f"   Filter: specific apps: {', '.join(args.apps)}")
+    if args.pattern:
+        print(f"   Filter: pattern '{args.pattern}'")
+    if args.skip:
+        print(f"   Filter: skipping first {args.skip} apps")
+    if args.start_from:
+        print(f"   Filter: starting from '{args.start_from}'")
+    if args.limit:
+        print(f"   Filter: limit to {args.limit} apps")
     print("=" * 60)
 
     results = []
@@ -876,6 +995,44 @@ def main():
     csv_content = generate_csv_report(results)
     csv_output.write_text(csv_content)
     print(f"✓ CSV report saved: {csv_output}")
+
+    # Log to MLflow
+    print("\n📊 Logging to MLflow...")
+    try:
+        from mlflow_tracker import EvaluationTracker
+
+        tracker = EvaluationTracker()
+        if tracker.enabled:
+            # Start MLflow run
+            run_name = f"eval-{timestamp}"
+            run_id = tracker.start_run(run_name=run_name, tags={"mode": "evaluation"})
+
+            # Log parameters
+            tracker.log_evaluation_parameters(
+                mode="evaluation",
+                total_apps=summary['total_apps'],
+                timestamp=timestamp,
+                model_version="claude-sonnet-4-5-20250929"
+            )
+
+            # Log metrics from evaluation report
+            tracker.log_evaluation_metrics(full_report)
+
+            # Log artifacts
+            tracker.log_artifact_file(str(json_output))
+            tracker.log_artifact_file(str(md_output))
+            tracker.log_artifact_file(str(csv_output))
+
+            # End run
+            tracker.end_run()
+
+            print(f"✓ MLflow tracking complete")
+            print(f"  Run ID: {run_id}")
+            print(f"  View: ML → Experiments → /Shared/klaudbiusz-evaluations")
+        else:
+            print("⚠️  MLflow tracking disabled (credentials not set)")
+    except Exception as e:
+        print(f"⚠️  MLflow tracking failed: {e}")
 
     # Print summary to console - All 9 metrics
     print("\n" + "=" * 60)
