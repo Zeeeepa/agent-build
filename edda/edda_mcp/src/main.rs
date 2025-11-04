@@ -352,7 +352,7 @@ async fn run_server(config: edda_mcp::config::Config) -> Result<()> {
     // wrap with trajectory tracking in binary mode
     match session_id {
         Some(session_id) => {
-            let tracking_provider = TrajectoryTrackingProvider::new(provider, session_id)?;
+            let tracking_provider = TrajectoryTrackingProvider::new(provider, session_id, config)?;
             let service = tracking_provider.serve(stdio()).await?;
             service.waiting().await?;
         }

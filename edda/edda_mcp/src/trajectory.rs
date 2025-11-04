@@ -12,6 +12,22 @@ use crate::paths;
 use crate::providers::CombinedProvider;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "entry_type")]
+pub enum HistoryEntry {
+    #[serde(rename = "session")]
+    Session(SessionMetadata),
+    #[serde(rename = "tool")]
+    Tool(TrajectoryEntry),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionMetadata {
+    pub session_id: String,
+    pub timestamp: String,
+    pub config: crate::config::Config,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TrajectoryEntry {
     pub session_id: String,
     pub timestamp: String,
@@ -29,15 +45,16 @@ pub struct TrajectoryTrackingProvider {
 }
 
 impl TrajectoryTrackingProvider {
-    pub fn new(inner: CombinedProvider, session_id: String) -> Result<Self> {
+    pub fn new(inner: CombinedProvider, session_id: String, config: crate::config::Config) -> Result<Self> {
         let history_path = paths::trajectory_path()?;
-        Self::new_with_path(inner, session_id, history_path)
+        Self::new_with_path(inner, session_id, config, history_path)
     }
 
     #[doc(hidden)]
     pub fn new_with_path(
         inner: CombinedProvider,
         session_id: String,
+        config: crate::config::Config,
         history_path: PathBuf,
     ) -> Result<Self> {
         // ensure parent directory exists
@@ -50,19 +67,33 @@ impl TrajectoryTrackingProvider {
             .append(true)
             .open(history_path)?;
 
-        Ok(Self {
+        let provider = Self {
             inner,
             history_file: Mutex::new(history_file),
+            session_id: session_id.clone(),
+        };
+
+        // write session metadata as first entry
+        let session_metadata = SessionMetadata {
             session_id,
-        })
+            timestamp: Utc::now().to_rfc3339(),
+            config,
+        };
+        provider.record_history_entry(HistoryEntry::Session(session_metadata))?;
+
+        Ok(provider)
     }
 
-    fn record_trajectory(&self, entry: TrajectoryEntry) -> Result<()> {
+    fn record_history_entry(&self, entry: HistoryEntry) -> Result<()> {
         let json_line = serde_json::to_string(&entry)?;
         let mut file = self.history_file.lock().unwrap();
         writeln!(file, "{}", json_line)?;
         file.flush()?;
         Ok(())
+    }
+
+    fn record_trajectory(&self, entry: TrajectoryEntry) -> Result<()> {
+        self.record_history_entry(HistoryEntry::Tool(entry))
     }
 }
 
@@ -126,6 +157,8 @@ impl ServerHandler for TrajectoryTrackingProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Config, IoConfig, TemplateConfig};
+    use crate::providers::ProviderType;
 
     #[test]
     fn test_trajectory_entry_serialization_success() {
@@ -139,13 +172,18 @@ mod tests {
             error: None,
         };
 
-        let json_line = serde_json::to_string(&entry).unwrap();
-        let deserialized: TrajectoryEntry = serde_json::from_str(&json_line).unwrap();
+        let json_line = serde_json::to_string(&HistoryEntry::Tool(entry)).unwrap();
+        let deserialized: HistoryEntry = serde_json::from_str(&json_line).unwrap();
 
-        assert_eq!(deserialized.session_id, "test-sess");
-        assert_eq!(deserialized.tool_name, "test_tool");
-        assert!(deserialized.success);
-        assert!(deserialized.error.is_none());
+        match deserialized {
+            HistoryEntry::Tool(te) => {
+                assert_eq!(te.session_id, "test-sess");
+                assert_eq!(te.tool_name, "test_tool");
+                assert!(te.success);
+                assert!(te.error.is_none());
+            }
+            _ => panic!("Expected Tool entry"),
+        }
     }
 
     #[test]
@@ -160,13 +198,18 @@ mod tests {
             error: Some("Tool execution failed".to_string()),
         };
 
-        let json_line = serde_json::to_string(&entry).unwrap();
-        let deserialized: TrajectoryEntry = serde_json::from_str(&json_line).unwrap();
+        let json_line = serde_json::to_string(&HistoryEntry::Tool(entry)).unwrap();
+        let deserialized: HistoryEntry = serde_json::from_str(&json_line).unwrap();
 
-        assert_eq!(deserialized.session_id, "test-sess");
-        assert!(!deserialized.success);
-        assert!(deserialized.result.is_none());
-        assert_eq!(deserialized.error.unwrap(), "Tool execution failed");
+        match deserialized {
+            HistoryEntry::Tool(te) => {
+                assert_eq!(te.session_id, "test-sess");
+                assert!(!te.success);
+                assert!(te.result.is_none());
+                assert_eq!(te.error.unwrap(), "Tool execution failed");
+            }
+            _ => panic!("Expected Tool entry"),
+        }
     }
 
     #[test]
@@ -181,7 +224,7 @@ mod tests {
             error: None,
         };
 
-        let json_line = serde_json::to_string(&entry).unwrap();
+        let json_line = serde_json::to_string(&HistoryEntry::Tool(entry)).unwrap();
 
         // should not contain newlines (JSONL requirement)
         assert!(!json_line.contains('\n'));
@@ -190,11 +233,85 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json_line).unwrap();
         assert!(parsed.is_object());
 
-        // should have all required fields
+        // should have entry_type field
         let obj = parsed.as_object().unwrap();
-        assert!(obj.contains_key("session_id"));
-        assert!(obj.contains_key("timestamp"));
-        assert!(obj.contains_key("tool_name"));
-        assert!(obj.contains_key("success"));
+        assert!(obj.contains_key("entry_type"));
+        assert_eq!(obj["entry_type"], "tool");
+    }
+
+    #[test]
+    fn test_session_metadata_serialization() {
+        let config = Config {
+            allow_deployment: true,
+            with_workspace_tools: false,
+            required_providers: vec![ProviderType::Databricks, ProviderType::Io],
+            io_config: Some(IoConfig {
+                template: TemplateConfig::Trpc,
+                validation: None,
+            }),
+        };
+
+        let metadata = SessionMetadata {
+            session_id: "sess-123".to_string(),
+            timestamp: "2025-10-29T10:00:00Z".to_string(),
+            config,
+        };
+
+        let json_line = serde_json::to_string(&HistoryEntry::Session(metadata)).unwrap();
+
+        // should not contain newlines
+        assert!(!json_line.contains('\n'));
+
+        // should deserialize correctly
+        let deserialized: HistoryEntry = serde_json::from_str(&json_line).unwrap();
+        match deserialized {
+            HistoryEntry::Session(sm) => {
+                assert_eq!(sm.session_id, "sess-123");
+                assert!(sm.config.allow_deployment);
+                assert!(sm.config.io_config.is_some());
+            }
+            _ => panic!("Expected Session entry"),
+        }
+    }
+
+    #[test]
+    fn test_session_metadata_with_custom_template() {
+        let config = Config {
+            allow_deployment: false,
+            with_workspace_tools: true,
+            required_providers: vec![ProviderType::Io],
+            io_config: Some(IoConfig {
+                template: TemplateConfig::Custom {
+                    name: "MyTemplate".to_string(),
+                    path: "/path/to/template".to_string(),
+                },
+                validation: None,
+            }),
+        };
+
+        let metadata = SessionMetadata {
+            session_id: "sess-456".to_string(),
+            timestamp: "2025-10-29T10:00:00Z".to_string(),
+            config,
+        };
+
+        let json_line = serde_json::to_string(&HistoryEntry::Session(metadata)).unwrap();
+        let deserialized: HistoryEntry = serde_json::from_str(&json_line).unwrap();
+
+        match deserialized {
+            HistoryEntry::Session(sm) => {
+                assert_eq!(sm.session_id, "sess-456");
+                assert!(!sm.config.allow_deployment);
+                assert!(sm.config.with_workspace_tools);
+                match &sm.config.io_config.unwrap().template {
+                    TemplateConfig::Custom { name, path } => {
+                        assert_eq!(name, "MyTemplate");
+                        assert_eq!(path, "/path/to/template");
+                    }
+                    _ => panic!("Expected Custom template"),
+                }
+            }
+            _ => panic!("Expected Session entry"),
+        }
     }
 }
