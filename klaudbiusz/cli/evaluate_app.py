@@ -693,9 +693,8 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
         )
 
     finally:
-        # Always cleanup
-        if metrics.runtime_success:
-            cleanup_container(container_name)
+        # Always cleanup container if it exists (regardless of success/failure)
+        cleanup_container(container_name)
 
     print(f"\nStatus: {overall_status}")
     print(f"Issues: {len(issues)}")
