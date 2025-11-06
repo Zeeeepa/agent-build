@@ -51,6 +51,26 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 
+# Helper functions for appeval_100 calculation
+from math import prod
+
+
+def _gm(values):
+    """Geometric mean of values, with floor at 1e-6."""
+    vals = [max(v, 1e-6) for v in values if v is not None]
+    return prod(vals) ** (1.0 / len(vals)) if vals else 0.0
+
+
+def _to01_bool(x):
+    """Convert boolean to 0/1 float."""
+    return 1.0 if x else 0.0
+
+
+def _to01_5(x):
+    """Convert 0-5 score to 0-1 range."""
+    return max(0.0, min(1.0, (x or 0) / 5.0))
+
+
 @dataclass
 class FullMetrics:
     """All 9 metrics from evals.md."""
@@ -78,6 +98,9 @@ class FullMetrics:
     has_tests: bool = False
     build_time_sec: float = 0.0
     startup_time_sec: float = 0.0
+
+    # Composite score
+    appeval_100: float = 0.0
 
 
 @dataclass
@@ -319,6 +342,29 @@ Respond with ONLY one word: PASS or FAIL""",
     metrics.deployability_score = deploy_score
     if deploy_score < 3:
         issues.append(f"Deployability concerns ({deploy_score}/5)")
+
+    # Calculate composite appeval_100 score
+    R = _gm([
+        _to01_bool(metrics.build_success),
+        _to01_bool(metrics.runtime_success),
+        _to01_bool(metrics.type_safety),
+        _to01_bool(metrics.tests_pass),
+        _to01_bool(metrics.databricks_connectivity),
+        _to01_bool(metrics.data_returned),
+        _to01_bool(metrics.ui_renders),
+    ])
+
+    D = _gm([
+        _to01_5(metrics.local_runability_score),
+        _to01_5(metrics.deployability_score),
+    ])
+
+    G = (0.25 + 0.75 * _to01_bool(metrics.build_success)) \
+      * (0.25 + 0.75 * _to01_bool(metrics.runtime_success)) \
+      * (0.50 + 0.50 * _to01_bool(metrics.databricks_connectivity))
+
+    appeval_100 = 100.0 * (0.7 * R + 0.3 * D) * G
+    metrics.appeval_100 = round(appeval_100, 1)
 
     # Code metrics
     metrics.total_loc = sum(
@@ -748,6 +794,8 @@ def generate_csv_report(results: list[dict]) -> str:
         # Metric 8-9: DevX
         "local_runability_score",
         "deployability_score",
+        # Composite score
+        "appeval_100",
         # Metadata
         "build_time_sec",
         "startup_time_sec",
@@ -781,6 +829,8 @@ def generate_csv_report(results: list[dict]) -> str:
             # Metric 8-9
             metrics["local_runability_score"],
             metrics["deployability_score"],
+            # Composite score
+            f"{metrics['appeval_100']:.1f}",
             # Metadata
             f"{metrics['build_time_sec']:.1f}",
             f"{metrics['startup_time_sec']:.1f}",

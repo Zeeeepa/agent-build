@@ -51,6 +51,26 @@ except ImportError:
     anthropic = None
 
 
+# Helper functions for appeval_100 calculation
+from math import prod
+
+
+def _gm(values):
+    """Geometric mean of values, with floor at 1e-6."""
+    vals = [max(v, 1e-6) for v in values if v is not None]
+    return prod(vals) ** (1.0 / len(vals)) if vals else 0.0
+
+
+def _to01_bool(x):
+    """Convert boolean to 0/1 float."""
+    return 1.0 if x else 0.0
+
+
+def _to01_5(x):
+    """Convert 0-5 score to 0-1 range."""
+    return max(0.0, min(1.0, (x or 0) / 5.0))
+
+
 @dataclass
 class EvalMetrics:
     """Core evaluation metrics."""
@@ -65,6 +85,7 @@ class EvalMetrics:
     ui_functional_score: int = 0
     local_runability_score: int = 0
     deployability_score: int = 0
+    appeval_100: float = 0.0
 
 
 @dataclass
@@ -676,6 +697,29 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
         metrics.deployability_score = deploy_score
         if deploy_score < 3:
             issues.append(f"Deployability concerns ({deploy_score}/5): {'; '.join([d for d in deploy_details if '✗' in d])}")
+
+        # Calculate composite appeval_100 score
+        R = _gm([
+            _to01_bool(metrics.build_success),
+            _to01_bool(metrics.runtime_success),
+            _to01_bool(metrics.type_safety),
+            _to01_bool(metrics.tests_pass),
+            _to01_bool(metrics.databricks_connectivity),
+            _to01_5(metrics.data_validity_score),
+            _to01_5(metrics.ui_functional_score),
+        ])
+
+        D = _gm([
+            _to01_5(metrics.local_runability_score),
+            _to01_5(metrics.deployability_score),
+        ])
+
+        G = (0.25 + 0.75 * _to01_bool(metrics.build_success)) \
+          * (0.25 + 0.75 * _to01_bool(metrics.runtime_success)) \
+          * (0.50 + 0.50 * _to01_bool(metrics.databricks_connectivity))
+
+        appeval_100 = 100.0 * (0.7 * R + 0.3 * D) * G
+        metrics.appeval_100 = round(appeval_100, 1)
 
         # Calculate overall status
         critical_checks = [

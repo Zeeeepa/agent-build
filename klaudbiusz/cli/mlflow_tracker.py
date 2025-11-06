@@ -216,6 +216,11 @@ class EvaluationTracker:
                 mlflow.log_metric("avg_runability_score", avg_runability)
                 mlflow.log_metric("avg_deployability_score", avg_deployability)
 
+                # Average appeval_100 composite score
+                avg_appeval_100 = sum(app['metrics'].get('appeval_100', 0)
+                                     for app in apps) / len(apps)
+                mlflow.log_metric("avg_appeval_100", avg_appeval_100)
+
                 # Overall quality score (0-1) - calculate from per-app metrics
                 # Use the table data which has accurate per-app results
                 if apps:
