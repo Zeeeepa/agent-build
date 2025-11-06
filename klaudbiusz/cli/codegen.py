@@ -315,6 +315,21 @@ Use up to 10 tools per call to speed up the process.\n"""
                             "generation_time_sec": generation_time_sec,
                             "app_dir": self.app_dir,
                         }
+
+                        # Save generation metrics to app directory for eval script
+                        if self.app_dir:
+                            import json
+                            metrics_file = Path(self.app_dir) / "generation_metrics.json"
+                            try:
+                                metrics_file.write_text(json.dumps({
+                                    "input_tokens": metrics["input_tokens"],
+                                    "output_tokens": metrics["output_tokens"],
+                                    "turns": metrics["turns"],
+                                    "cost_usd": metrics["cost_usd"],
+                                    "generation_time_sec": metrics["generation_time_sec"],
+                                }, indent=2))
+                            except Exception as e:
+                                logger.warning(f"Failed to save generation metrics: {e}")
                     case _:
                         pass
         except Exception as e:

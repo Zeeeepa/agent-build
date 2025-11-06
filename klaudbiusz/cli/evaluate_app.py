@@ -192,27 +192,46 @@ def install_dependencies(app_dir: Path) -> bool:
     """Install npm dependencies for both client and server."""
     print("  [0/7] Installing dependencies...")
 
-    # Install server dependencies
-    server_success, _, _ = run_command(
-        ["npm", "install"],
-        cwd=str(app_dir / "server"),
-        timeout=180,
-    )
+    # Check if root-level package.json exists (monorepo style)
+    root_pkg = app_dir / "package.json"
+    if root_pkg.exists():
+        root_success, _, _ = run_command(
+            ["npm", "install"],
+            cwd=str(app_dir),
+            timeout=180,
+        )
+        if root_success:
+            print("    ✅ Dependencies installed (root)")
+            return True
+        else:
+            print("    ⚠️  Root npm install failed")
 
-    if not server_success:
-        print("    ⚠️  Server npm install failed")
+    # Try server/ or backend/
+    server_dir = app_dir / "server" if (app_dir / "server").exists() else app_dir / "backend"
+    if server_dir.exists() and (server_dir / "package.json").exists():
+        server_success, _, _ = run_command(
+            ["npm", "install"],
+            cwd=str(server_dir),
+            timeout=180,
+        )
+        if not server_success:
+            print(f"    ⚠️  {server_dir.name} npm install failed")
+            return False
+    else:
+        print(f"    ⚠️  No {server_dir.name} directory or package.json")
         return False
 
-    # Install client dependencies
-    client_success, _, _ = run_command(
-        ["npm", "install"],
-        cwd=str(app_dir / "client"),
-        timeout=180,
-    )
-
-    if not client_success:
-        print("    ⚠️  Client npm install failed")
-        return False
+    # Try client/ or frontend/
+    client_dir = app_dir / "client" if (app_dir / "client").exists() else app_dir / "frontend"
+    if client_dir.exists() and (client_dir / "package.json").exists():
+        client_success, _, _ = run_command(
+            ["npm", "install"],
+            cwd=str(client_dir),
+            timeout=180,
+        )
+        if not client_success:
+            print(f"    ⚠️  {client_dir.name} npm install failed")
+            return False
 
     print("    ✅ Dependencies installed")
     return True
@@ -222,19 +241,25 @@ def check_type_safety(app_dir: Path) -> bool:
     """Metric 3: TypeScript compiles without errors."""
     print("  [3/7] Checking type safety...")
 
-    # Check server
-    server_success, _, _ = run_command(
-        ["npx", "tsc", "--noEmit"],
-        cwd=str(app_dir / "server"),
-        timeout=60,
-    )
+    # Check server or backend
+    server_dir = app_dir / "server" if (app_dir / "server").exists() else app_dir / "backend"
+    server_success = True
+    if server_dir.exists():
+        server_success, _, _ = run_command(
+            ["npx", "tsc", "--noEmit"],
+            cwd=str(server_dir),
+            timeout=60,
+        )
 
-    # Check client
-    client_success, _, _ = run_command(
-        ["npx", "tsc", "--noEmit"],
-        cwd=str(app_dir / "client"),
-        timeout=60,
-    )
+    # Check client or frontend
+    client_dir = app_dir / "client" if (app_dir / "client").exists() else app_dir / "frontend"
+    client_success = True
+    if client_dir.exists():
+        client_success, _, _ = run_command(
+            ["npx", "tsc", "--noEmit"],
+            cwd=str(client_dir),
+            timeout=60,
+        )
 
     return server_success and client_success
 
@@ -243,14 +268,23 @@ def check_tests_pass(app_dir: Path) -> tuple[bool, float, bool]:
     """Metric 4: Tests pass with coverage."""
     print("  [4/7] Checking tests pass...")
 
+    # Find server or backend dir
+    server_dir = app_dir / "server" if (app_dir / "server").exists() else app_dir / "backend"
+
+    if not server_dir.exists():
+        return False, 0.0, False
+
     success, stdout, stderr = run_command(
         ["npm", "test", "--", "--experimental-test-coverage"],
-        cwd=str(app_dir / "server"),
+        cwd=str(server_dir),
         timeout=120,
     )
 
     # Check if tests exist
-    test_files = list((app_dir / "server" / "src").glob("*.test.ts")) + list((app_dir / "server" / "src").glob("**/*.test.ts"))
+    src_dir = server_dir / "src"
+    test_files = []
+    if src_dir.exists():
+        test_files = list(src_dir.glob("*.test.ts")) + list(src_dir.glob("**/*.test.ts"))
     has_tests = len(test_files) > 0
 
     # Parse coverage from output (node's test runner output format)
@@ -282,8 +316,12 @@ def check_data_validity_llm(app_dir: Path, prompt: str | None) -> tuple[bool, st
     if not anthropic or not prompt:
         return False, "Skipped: Anthropic client not available or no prompt"
 
-    # Extract SQL queries from source
-    index_ts = app_dir / "server" / "src" / "index.ts"
+    # Extract SQL queries from source - try server/backend
+    server_dir = app_dir / "server" if (app_dir / "server").exists() else app_dir / "backend"
+    index_ts = server_dir / "src" / "index.ts"
+    if not index_ts.exists():
+        # Try without src/
+        index_ts = server_dir / "index.ts"
     if not index_ts.exists():
         return False, "No index.ts found"
 
@@ -450,20 +488,24 @@ def check_local_runability(app_dir: Path) -> tuple[int, list[str]]:
         details.append("✗ No .env.example or .env.template")
 
     # Check 3: Dependencies install cleanly
-    server_install, _, _ = run_command(
-        ["npm", "install", "--dry-run"],
-        cwd=str(app_dir / "server"),
-        timeout=60,
-    )
-    if server_install:
-        score += 1
-        details.append("✓ Server dependencies installable")
+    server_dir = app_dir / "server" if (app_dir / "server").exists() else app_dir / "backend"
+    if server_dir.exists():
+        server_install, _, _ = run_command(
+            ["npm", "install", "--dry-run"],
+            cwd=str(server_dir),
+            timeout=60,
+        )
+        if server_install:
+            score += 1
+            details.append(f"✓ {server_dir.name} dependencies installable")
+        else:
+            details.append(f"✗ {server_dir.name} npm install issues")
     else:
-        details.append("✗ Server npm install issues")
+        details.append("✗ No server/backend directory")
 
     # Check 4: npm start command defined
-    server_pkg = app_dir / "server" / "package.json"
-    if server_pkg.exists():
+    server_pkg = server_dir / "package.json" if server_dir.exists() else None
+    if server_pkg and server_pkg.exists():
         try:
             pkg_data = json.loads(server_pkg.read_text())
             if "start" in pkg_data.get("scripts", {}):
@@ -479,10 +521,15 @@ def check_local_runability(app_dir: Path) -> tuple[int, list[str]]:
     # Check 5: Test if app can start locally (lightweight check - just see if it's runnable)
     # We won't actually start it here as it's redundant with runtime check
     # Instead, check if entry point exists
-    entry_point = app_dir / "server" / "src" / "index.ts"
-    if entry_point.exists():
+    entry_point = None
+    if server_dir.exists():
+        entry_point = server_dir / "src" / "index.ts"
+        if not entry_point.exists():
+            entry_point = server_dir / "index.ts"
+
+    if entry_point and entry_point.exists():
         score += 1
-        details.append("✓ Entry point exists (server/src/index.ts)")
+        details.append(f"✓ Entry point exists ({entry_point.relative_to(app_dir)})")
     else:
         details.append("✗ No entry point found")
 
@@ -529,7 +576,7 @@ def check_deployability(app_dir: Path) -> tuple[int, list[str]]:
     # Check 4: No hardcoded secrets
     has_secrets = False
     for pattern in ["DATABRICKS_TOKEN=dapi", "password=", "api_key=", "secret="]:
-        success, stdout, _ = run_command(
+        success, _, _ = run_command(
             ["grep", "-r", "-i", pattern, ".", "--exclude-dir=node_modules", "--exclude-dir=.git"],
             cwd=str(app_dir),
             timeout=10,
