@@ -85,7 +85,15 @@ impl Config {
                 // if CLI explicitly disables, set to None
                 if screenshot_overrides.enabled == Some(false) {
                     io_config.screenshot = None;
-                } else if let Some(mut screenshot_cfg) = io_config.screenshot {
+                } else {
+                    // Get existing config or create default
+                    let mut screenshot_cfg = io_config.screenshot.unwrap_or_else(|| ScreenshotConfig {
+                        enabled: None,
+                        url: None,
+                        port: None,
+                        wait_time_ms: None,
+                    });
+
                     // apply individual field overrides
                     if let Some(enabled) = screenshot_overrides.enabled {
                         screenshot_cfg.enabled = Some(enabled);

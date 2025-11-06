@@ -259,28 +259,41 @@ impl ServerHandler for CombinedProvider {
 
             // spawn non-blocking warmup task
             tokio::spawn(async move {
-                let mut warmed = playwright_warmed.write().await;
-                if !*warmed {
-                    tracing::info!("Starting playwright warmup (non-blocking)");
+                // Fast path: check with read lock first
+                if *playwright_warmed.read().await {
+                    return;
+                }
 
-                    let warmup_result = edda_sandbox::dagger::ConnectOpts::default()
-                        .with_logger(edda_sandbox::dagger::Logger::Silent)
-                        .with_execute_timeout(Some(600))
-                        .connect(|client| async move {
-                            edda_screenshot::warmup_playwright(&client).await?;
-                            Ok(())
-                        })
-                        .await;
+                // Acquire write lock only for state transition
+                {
+                    let warmed = playwright_warmed.write().await;
+                    if *warmed {
+                        return; // Another task already completed warmup
+                    }
+                    // Write lock released here when scope ends
+                }
 
-                    match warmup_result {
-                        Ok(_) => {
-                            tracing::info!("Playwright warmup completed successfully");
-                            *warmed = true;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Playwright warmup failed: {}", e);
-                            // don't mark as warmed so it can retry on next call
-                        }
+                tracing::info!("Starting playwright warmup (non-blocking)");
+
+                let warmup_result = edda_sandbox::dagger::ConnectOpts::default()
+                    .with_logger(edda_sandbox::dagger::Logger::Silent)
+                    .with_execute_timeout(Some(600))
+                    .connect(|client| async move {
+                        edda_screenshot::warmup_playwright(&client).await?;
+                        Ok(())
+                    })
+                    .await;
+
+                // Reacquire write lock to update state
+                let warmed = &mut *playwright_warmed.write().await;
+                match warmup_result {
+                    Ok(_) => {
+                        tracing::info!("Playwright warmup completed successfully");
+                        *warmed = true;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Playwright warmup failed: {}", e);
+                        // don't mark as warmed so it can retry on next call
                     }
                 }
             });

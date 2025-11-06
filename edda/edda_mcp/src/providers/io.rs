@@ -256,15 +256,9 @@ impl IOProvider {
         let app_source = client.host().directory(work_dir.display().to_string());
 
         // capture screenshot and handle errors with context
-        let result_dir = match edda_screenshot::screenshot_app(client, app_source, options).await {
-            Ok(dir) => dir,
-            Err(e) => {
-                // screenshot failed - this usually means app didn't start properly
-                let error_msg = format!("Screenshot capture failed (app may not have started): {}", e);
-                tracing::error!("{}", error_msg);
-                return Err(eyre::eyre!(error_msg));
-            }
-        };
+        let result_dir = edda_screenshot::screenshot_app(client, app_source, options)
+            .await
+            .context("Screenshot capture failed (app may not have started)")?;
 
         // export screenshot to work_dir/screenshot.png
         let screenshot_path = work_dir.join("screenshot.png");
@@ -276,18 +270,19 @@ impl IOProvider {
 
         tracing::info!("Screenshot saved to: {}", screenshot_path.display());
 
-        // read browser console logs if available
+        // read browser console logs if available (soft failure - empty string if missing)
         let browser_logs = match result_dir.file("logs.txt").contents().await {
             Ok(logs) => {
                 if !logs.trim().is_empty() {
                     tracing::info!("Browser console logs captured ({} bytes)", logs.len());
                     Some(logs)
                 } else {
+                    tracing::debug!("Browser logs file is empty");
                     None
                 }
             }
             Err(e) => {
-                tracing::warn!("Failed to read browser logs: {}", e);
+                tracing::warn!("Failed to read browser logs (screenshot succeeded, logs missing): {}", e);
                 None
             }
         };
@@ -332,20 +327,18 @@ impl IOProvider {
             tracing::info!("Spawning screenshot task in parallel with validation");
 
             Some(tokio::spawn(async move {
+                let (screenshot_tx, screenshot_rx) = tokio::sync::oneshot::channel();
+
                 let screenshot_opts = ConnectOpts::default()
                     .with_logger(Logger::Silent)
                     .with_execute_timeout(Some(600));
-
-                let (screenshot_tx, screenshot_rx) = tokio::sync::oneshot::channel();
-                let work_dir_inner = work_dir_clone.clone();
-                let screenshot_config_inner = screenshot_config_clone.clone();
 
                 let screenshot_connect_result = screenshot_opts
                     .connect(move |client| async move {
                         let result = IOProvider::capture_screenshot(
                             &client,
-                            &work_dir_inner,
-                            screenshot_config_inner.as_ref(),
+                            &work_dir_clone,
+                            screenshot_config_clone.as_ref(),
                         )
                         .await;
                         let _ = screenshot_tx.send(result);
@@ -425,13 +418,30 @@ impl IOProvider {
                 let project_state = project_state.validate(checksum)?;
                 state::save_state(work_dir, &project_state)?;
 
-                // await screenshot task if it was spawned (wait-or-timeout pattern)
+                // await screenshot task with timeout if it was spawned
                 let (screenshot_path, browser_logs) = if let Some(task) = screenshot_task {
                     tracing::info!("Validation passed, awaiting screenshot result");
-                    match task.await {
-                        Ok(Ok((path, logs))) => (Some(path), logs),
-                        Ok(Err(e)) => return Err(e), // screenshot failed - propagate error
-                        Err(e) => return Err(eyre::eyre!("screenshot task panicked: {}", e)),
+
+                    use tokio::time::{timeout, Duration};
+                    let screenshot_timeout = Duration::from_secs(300); // 5 minutes
+
+                    match timeout(screenshot_timeout, task).await {
+                        Ok(Ok(Ok((path, logs)))) => (Some(path), logs),
+                        Ok(Ok(Err(e))) => {
+                            // Screenshot failed, but validation passed - soft failure
+                            tracing::warn!("Screenshot capture failed (validation passed): {}", e);
+                            let error_msg = format!("Screenshot failed: {}", e);
+                            (None, Some(error_msg))
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!("Screenshot task panicked (validation passed): {}", e);
+                            let error_msg = format!("Screenshot task panicked: {}", e);
+                            (None, Some(error_msg))
+                        }
+                        Err(_) => {
+                            tracing::warn!("Screenshot timed out after {} seconds (validation passed)", screenshot_timeout.as_secs());
+                            (None, Some("Screenshot timed out".to_string()))
+                        }
                     }
                 } else {
                     (None, None)
@@ -446,10 +456,11 @@ impl IOProvider {
                 }
             }
             Err(details) => {
-                // validation failed - drop screenshot task (let dagger cleanup handle it)
-                if screenshot_task.is_some() {
-                    tracing::info!("Validation failed, screenshot task will be dropped");
-                    // task is dropped here, dagger connection cleanup handles container termination
+                // validation failed - explicitly abort screenshot task
+                if let Some(task) = screenshot_task {
+                    tracing::info!("Validation failed, aborting screenshot task");
+                    task.abort();
+                    let _ = task.await; // Wait for abort to complete, ignore result
                 }
 
                 ValidateProjectResult {
