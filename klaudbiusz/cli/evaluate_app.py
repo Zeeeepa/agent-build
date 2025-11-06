@@ -37,8 +37,7 @@ env_paths = [
 ]
 for env_path in env_paths:
     if env_path.exists():
-        load_dotenv(env_path)
-        print(f"Loaded environment from: {env_path}")
+        load_dotenv(env_path, override=True)  # override=True to ensure vars are set
         break
 
 try:
@@ -146,8 +145,10 @@ def check_runtime_success(app_dir: Path, container_name: str) -> tuple[bool, dic
         env_vars.extend(["-e", f"DATABRICKS_HOST={os.environ['DATABRICKS_HOST']}"])
     if "DATABRICKS_TOKEN" in os.environ:
         env_vars.extend(["-e", f"DATABRICKS_TOKEN={os.environ['DATABRICKS_TOKEN']}"])
+    if "DATABRICKS_WAREHOUSE_ID" in os.environ:
+        env_vars.extend(["-e", f"DATABRICKS_WAREHOUSE_ID={os.environ['DATABRICKS_WAREHOUSE_ID']}"])
 
-    success, _, _ = run_command(
+    success, stdout, stderr = run_command(
         [
             "docker",
             "run",
@@ -172,7 +173,7 @@ def check_runtime_success(app_dir: Path, container_name: str) -> tuple[bool, dic
     # Check health endpoint
     start = time.time()
     for _ in range(6):  # Try for 30 seconds
-        success, stdout, _ = run_command(
+        success, stdout, stderr = run_command(
             ["curl", "-f", "-s", "http://localhost:8000/healthcheck"],
             timeout=10,
         )

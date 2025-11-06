@@ -40,20 +40,15 @@ def check_databricks_connectivity(
 
     # Try first few data procedures (skip healthcheck)
     for proc in procedures[:3]:  # Try up to 3 endpoints
+        # Try GET request first (standard for tRPC queries)
         success, stdout, _ = run_command(
             [
                 "curl",
                 "-f",
                 "-s",
-                "-X",
-                "POST",
                 f"http://localhost:{port}/api/trpc/{proc}",
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                "{}",
             ],
-            60,
+            timeout=60,
         )
 
         if success:
