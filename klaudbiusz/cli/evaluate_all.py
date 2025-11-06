@@ -117,6 +117,7 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
             issues.append("Docker build failed")
 
     # Metric 2: Runtime Success (requires Docker - skip if build failed)
+    container_id = None
     if metrics.build_success:
         # Start container with PORT=3000 to match our health check
         start_time = time.time()
@@ -151,9 +152,10 @@ def evaluate_app(app_dir: Path, prompt: str | None = None) -> EvalResult:
                 issues.append("Container exited immediately after start")
                 metrics.startup_time_sec = time.time() - start_time
 
-            # Cleanup
-            run_command(["docker", "stop", container_id], timeout=10)
-            run_command(["docker", "rm", container_id], timeout=10)
+    # Always cleanup container if it was created (regardless of success/failure)
+    if container_id:
+        run_command(["docker", "stop", container_id], timeout=10)
+        run_command(["docker", "rm", container_id], timeout=10)
 
     # Install dependencies (needed for TypeScript and tests)
     print("  Installing dependencies...")
