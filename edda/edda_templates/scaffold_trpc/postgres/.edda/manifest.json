@@ -1,0 +1,5 @@
+{
+  "env_vars": ["APP_DATABASE_URL"],
+  "services": ["postgres"],
+  "install": "PATCH"
+}
