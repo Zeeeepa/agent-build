@@ -42,8 +42,8 @@ def calculate_appeval_100(
     type_safety: bool,
     tests_pass: bool,
     databricks_connectivity: bool,
-    data_metric: float | bool,  # Either 0-5 score or boolean
-    ui_metric: float | bool,  # Either 0-5 score or boolean
+    data_metric: float | bool,  # Either 0-5 score or boolean  # noqa: ARG001
+    ui_metric: float | bool,  # Either 0-5 score or boolean  # noqa: ARG001
     local_runability_score: int,
     deployability_score: int,
 ) -> float:
