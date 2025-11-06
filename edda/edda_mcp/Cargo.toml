@@ -39,6 +39,7 @@ semver = "1.0"
 # internal dependencies
 edda_integrations = { path = "../edda_integrations" }
 edda_sandbox = { path = "../edda_sandbox" }
+edda_screenshot = { path = "../edda_screenshot" }
 edda_templates = { path = "../edda_templates" }
 
 [dev-dependencies]

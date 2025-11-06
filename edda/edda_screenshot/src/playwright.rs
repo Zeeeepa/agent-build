@@ -7,6 +7,14 @@ const PLAYWRIGHT_VERSION: &str = "v1.40.0-jammy";
 // Embed playwright directory at compile time
 static PLAYWRIGHT_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/playwright");
 
+/// Idempotent warmup that pre-pulls playwright image and installs browsers.
+/// Safe to call multiple times - Dagger caches layers.
+/// Returns pre-built container that can be reused.
+pub async fn warmup_playwright(client: &DaggerConn) -> Result<Container> {
+    tracing::info!("Warming up Playwright (pulling image and installing browsers)");
+    build_playwright_base(client).await
+}
+
 /// Build the base Playwright container with cached dependencies
 pub async fn build_playwright_base(client: &DaggerConn) -> Result<Container> {
     let playwright_source = get_playwright_source(client)?;
