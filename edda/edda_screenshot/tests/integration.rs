@@ -28,6 +28,7 @@ fn test_screenshot_options_custom() {
 /// Run with: cargo test test_screenshot_smoke -- --ignored --nocapture
 /// Requires Dagger to be running locally
 #[tokio::test]
+#[cfg_attr(not(feature = "dagger"), ignore)]
 #[ignore]
 async fn test_screenshot_smoke() {
     use edda_sandbox::dagger::ConnectOpts;

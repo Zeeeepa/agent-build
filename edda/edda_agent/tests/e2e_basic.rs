@@ -100,6 +100,7 @@ impl Agent for BasicAgent {
 
 /// Test with Anthropic (Claude)
 #[tokio::test]
+#[cfg_attr(not(feature = "dagger"), ignore)]
 async fn test_e2e_basic_anthropic() {
     test_e2e_basic_impl(
         "test_e2e_basic_anthropic",
@@ -111,6 +112,7 @@ async fn test_e2e_basic_anthropic() {
 
 /// Test with OpenRouter (DeepSeek)
 #[tokio::test]
+#[cfg_attr(not(feature = "dagger"), ignore)]
 #[ignore] // API performance variability causes timeouts
 async fn test_e2e_basic_openrouter() {
     test_e2e_basic_impl(

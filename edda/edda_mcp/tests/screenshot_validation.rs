@@ -10,6 +10,7 @@ fn initiate_project_for_tests(work_dir: &Path, force_rewrite: bool) {
 }
 
 #[tokio::test]
+#[cfg_attr(not(feature = "dagger"), ignore)]
 async fn test_screenshot_capture_success() {
     let temp_dir = TempDir::new().unwrap();
     let work_dir = temp_dir.path();
@@ -60,6 +61,7 @@ async fn test_screenshot_capture_success() {
 }
 
 #[tokio::test]
+#[cfg_attr(not(feature = "dagger"), ignore)]
 async fn test_screenshot_failure_missing_dockerfile() {
     let temp_dir = TempDir::new().unwrap();
     let work_dir = temp_dir.path();

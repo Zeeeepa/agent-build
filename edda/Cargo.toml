@@ -2,6 +2,9 @@
 resolver = "3"
 members = ["edda_agent", "edda_cli", "edda_mq", "edda_sandbox", "edda_integrations", "edda_mcp", "edda_screenshot", "edda_templates"]
 
+[workspace.metadata.features]
+dagger = []
+
 [profile.dev]
 opt-level = 0
 debug = true
