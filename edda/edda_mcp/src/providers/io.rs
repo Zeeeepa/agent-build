@@ -228,9 +228,9 @@ impl IOProvider {
         let default_cfg = crate::config::ScreenshotConfig::default();
         let screenshot_cfg = screenshot_config.unwrap_or(&default_cfg);
         let options = edda_screenshot::ScreenshotOptions {
-            url: screenshot_cfg.url.clone().unwrap_or_else(|| "/".to_string()),
-            port: screenshot_cfg.port.unwrap_or(8000),
-            wait_time_ms: screenshot_cfg.wait_time_ms.unwrap_or(30000),
+            url: screenshot_cfg.url.clone().unwrap(),
+            port: screenshot_cfg.port.unwrap(),
+            wait_time_ms: screenshot_cfg.wait_time_ms.unwrap(),
             env_vars: {
                 let mut vars = vec![];
                 if let Ok(host) = std::env::var("DATABRICKS_HOST") {
