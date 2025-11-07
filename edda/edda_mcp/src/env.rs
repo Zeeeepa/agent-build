@@ -146,17 +146,10 @@ pub fn create_env_example() -> eyre::Result<()> {
 # Databricks Configuration
 # ============================================
 # Required for Databricks tools (list catalogs, schemas, tables, execute SQL)
-# DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+# DATABRICKS_HOST=your-workspace.cloud.databricks.com
 # DATABRICKS_TOKEN=dapi...
-
-# Required only for deployment (deploy_data_app tool)
 # DATABRICKS_WAREHOUSE_ID=your-warehouse-id
 
-# ============================================
-# Google Sheets Configuration (Optional)
-# ============================================
-# Path to Google service account credentials JSON file
-# GOOGLE_CREDENTIALS_PATH=~/.config/gspread/credentials.json
 "#;
 
     std::fs::write(&example_path, example_content)?;
