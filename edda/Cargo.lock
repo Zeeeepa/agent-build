@@ -1059,6 +1059,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "dirs",
+ "dotenvy",
  "edda_integrations",
  "edda_sandbox",
  "edda_screenshot",

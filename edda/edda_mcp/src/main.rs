@@ -159,6 +159,9 @@ async fn check_environment(config: &edda_mcp::config::Config) -> Result<()> {
 
     let mut all_passed = true;
 
+    // load env vars for validation
+    let env = edda_mcp::env::EnvVars::load()?;
+
     // check docker
     print!("  Docker availability... ");
     match check_docker_available().await {
@@ -174,31 +177,25 @@ async fn check_environment(config: &edda_mcp::config::Config) -> Result<()> {
         || config.required_providers.contains(&ProviderType::Deployment);
 
     if databricks_required {
-        let databricks_checks = [
-            ("DATABRICKS_HOST", true),
-            ("DATABRICKS_TOKEN", true),
-            ("DATABRICKS_WAREHOUSE_ID", config.required_providers.contains(&ProviderType::Deployment)),
-        ];
-
-        for (var_name, required) in databricks_checks {
-            print!("  {}... ", var_name);
-            match std::env::var(var_name) {
-                Ok(value) if !value.is_empty() => {
-                    println!("✓");
-                    // warn if DATABRICKS_HOST starts with http
-                    if var_name == "DATABRICKS_HOST" && value.starts_with("http") {
-                        println!("    ⚠ Warning: DATABRICKS_HOST should not include protocol");
-                        println!("    Some clients may struggle with this format");
+        print!("  Databricks credentials... ");
+        let require_warehouse = config.required_providers.contains(&ProviderType::Deployment);
+        match env.validate_databricks(require_warehouse) {
+            Ok(_) => {
+                println!("✓");
+                // show which env vars were found
+                if let Some(host) = env.databricks_host() {
+                    println!("    DATABRICKS_HOST: {}", host);
+                }
+                println!("    DATABRICKS_TOKEN: [set]");
+                if require_warehouse {
+                    if let Some(warehouse_id) = env.databricks_warehouse_id() {
+                        println!("    DATABRICKS_WAREHOUSE_ID: {}", warehouse_id);
                     }
                 }
-                _ => {
-                    if required {
-                        println!("✗\n    Error: {} environment variable not set", var_name);
-                        all_passed = false;
-                    } else {
-                        println!("⚠ (optional for your config)");
-                    }
-                }
+            }
+            Err(e) => {
+                println!("✗\n    Error: {}", e);
+                all_passed = false;
             }
         }
 
@@ -241,6 +238,11 @@ async fn check_environment(config: &edda_mcp::config::Config) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // load environment variables early (before any other initialization)
+    // this ensures .env.example is created and env vars are available
+    edda_mcp::env::create_env_example()?;
+    let _env = edda_mcp::env::EnvVars::load()?;
+
     let cli = Cli::parse();
 
     match cli.command {

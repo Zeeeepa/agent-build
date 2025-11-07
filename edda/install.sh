@@ -258,6 +258,19 @@ download_and_install() {
         warn "Environment needs configuration - see checks above"
     fi
 
+    # Inform about .env.example creation
+    echo ""
+    echo "${BOLD}Environment Configuration${RESET}"
+    echo ""
+    echo "  A template .env.example has been created at:"
+    echo "  ${CYAN}~/.edda/.env.example${RESET}"
+    echo ""
+    echo "  To configure credentials:"
+    echo "  1. ${DIM}cp ~/.edda/.env.example ~/.edda/.env${RESET}"
+    echo "  2. Edit ${DIM}~/.edda/.env${RESET} and add your credentials"
+    echo "  3. Run ${DIM}edda_mcp check${RESET} to validate"
+    echo ""
+
     print_claude_instructions "$_install_path"
 }
 
