@@ -6,6 +6,7 @@
 //!
 //! Provides grouped validation for provider-specific credentials.
 
+use crate::paths;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -27,19 +28,17 @@ impl EnvVars {
         }
 
         // then, load from ~/.edda/.env (overrides system env)
-        if let Some(home_dir) = dirs::home_dir() {
-            let env_path = home_dir.join(".edda").join(".env");
-            if env_path.exists() {
-                tracing::debug!("Loading environment from {}", env_path.display());
-                dotenvy::from_path(&env_path)?;
+        let env_path = paths::edda_dir()?.join(".env");
+        if env_path.exists() {
+            tracing::debug!("Loading environment from {}", env_path.display());
+            dotenvy::from_path(&env_path)?;
 
-                // re-read all env vars to get the loaded ones
-                for (key, value) in std::env::vars() {
-                    vars.insert(key, value);
-                }
-            } else {
-                tracing::debug!("No .env file found at {}", env_path.display());
+            // re-read all env vars to get the loaded ones
+            for (key, value) in std::env::vars() {
+                vars.insert(key, value);
             }
+        } else {
+            tracing::debug!("No .env file found at {}", env_path.display());
         }
 
         Ok(Self { vars })
@@ -129,10 +128,7 @@ impl EnvVars {
 
 /// Create .env.example file in ~/.edda/ if it doesn't exist
 pub fn create_env_example() -> eyre::Result<()> {
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| eyre::eyre!("Could not determine home directory"))?;
-
-    let edda_dir = home_dir.join(".edda");
+    let edda_dir = paths::edda_dir()?;
     std::fs::create_dir_all(&edda_dir)?;
 
     let example_path = edda_dir.join(".env.example");

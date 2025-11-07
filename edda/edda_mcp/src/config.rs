@@ -52,16 +52,15 @@ pub struct ScreenshotOverrides {
 
 impl Config {
     pub fn load_from_dir() -> eyre::Result<Self> {
-        let default_config = Ok(Self::default());
-        let home_dir = match std::env::var("HOME") {
+        let edda_dir = match crate::paths::edda_dir() {
             Ok(dir) => dir,
-            Err(_) => return default_config,
+            Err(_) => return Ok(Self::default()),
         };
 
-        let config_path = format!("{}/.edda/config.json", home_dir);
-        if !std::path::Path::new(&config_path).exists() {
+        let config_path = edda_dir.join("config.json");
+        if !config_path.exists() {
             let json = serde_json::to_string_pretty(&Self::default())?;
-            std::fs::create_dir_all(format!("{}/.edda", home_dir))?;
+            std::fs::create_dir_all(&edda_dir)?;
             std::fs::write(&config_path, json)?;
         }
 
