@@ -142,7 +142,7 @@ class EvalResult:
     details: dict[str, Any]
 
 
-def run_command(cmd: list[str], cwd: str | None = None, timeout: int = 300) -> tuple[bool, str, str]:
+def run_command(cmd: list[str], cwd: str | None = None, timeout: int = 300, env: dict[str, str] | None = None) -> tuple[bool, str, str]:
     """Run a shell command and return (success, stdout, stderr)."""
     try:
         result = subprocess.run(
@@ -151,6 +151,7 @@ def run_command(cmd: list[str], cwd: str | None = None, timeout: int = 300) -> t
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         return result.returncode == 0, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
@@ -259,6 +260,7 @@ def check_runtime_success(app_dir: Path, container_name: str, template: str = "u
     """Metric 2: App starts and responds to requests.
 
     Uses template-specific start/stop scripts in cli/eval/<template>/.
+    Start scripts handle waiting and health checking internally.
     """
     print("  [2/7] Checking runtime success...")
 
@@ -266,19 +268,15 @@ def check_runtime_success(app_dir: Path, container_name: str, template: str = "u
     _stop_app(app_dir, template)
 
     dockerfile = app_dir / "Dockerfile"
-    process = None
 
     try:
         # Determine which template script to use
         if dockerfile.exists():
             script_dir = "docker"
-            wait_time = 5  # Docker containers start faster
         elif template == "dbx-sdk":
             script_dir = "dbx-sdk"
-            wait_time = 10
         elif template == "trpc":
             script_dir = "trpc"
-            wait_time = 10
         else:
             # Unknown template - fail with clear error
             print(f"  ⚠️  Unknown template: {template}")
@@ -296,62 +294,33 @@ def check_runtime_success(app_dir: Path, container_name: str, template: str = "u
             print(f"  ⚠️  Missing DATABRICKS_HOST or DATABRICKS_TOKEN")
             return False, {}
 
-        # Start the app in background
-        process = subprocess.Popen(
+        # Run start script (includes startup, waiting, and health check)
+        start_time = time.time()
+        success, _, stderr = run_command(
             ["bash", str(start_script)],
             cwd=str(app_dir),
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            timeout=30,  # Max 30 seconds for start + health check
         )
+        startup_time = time.time() - start_time
 
-        # Wait for app to start
-        time.sleep(wait_time)
+        # Cleanup regardless of success/failure
+        _stop_app(app_dir, template)
 
-        # Check if process is still running (for npm apps)
-        if script_dir != "docker" and process.poll() is not None:
-            _stdout, stderr = process.communicate(timeout=1)
-            print(f"  ⚠️  Process died during startup (exit code: {process.returncode})")
+        if success:
+            return True, {"startup_time_sec": round(startup_time, 1)}
+        else:
+            # Show error output from script
             if stderr:
-                print(f"  Error output:")
-                for line in stderr.strip().split('\n')[:10]:
+                print(f"  ⚠️  Startup failed:")
+                for line in stderr.strip().split('\n')[:5]:
                     print(f"    {line}")
             return False, {}
 
-        # HEALTH CHECK: Try to reach the app
-        start_time = time.time()
-        for _ in range(6):  # Try for 30 seconds
-            # Try healthcheck endpoint
-            success, _stdout, _stderr = run_command(
-                ["curl", "-f", "-s", "http://localhost:8000/healthcheck"],
-                timeout=10,
-            )
-            if success:
-                startup_time = time.time() - start_time
-                _stop_app(app_dir, template)
-                return True, {"startup_time_sec": round(startup_time, 1)}
-
-            # Try root endpoint as fallback (for npm apps only, not docker)
-            if script_dir != "docker":
-                success, _stdout, _stderr = run_command(
-                    ["curl", "-f", "-s", "http://localhost:8000/"],
-                    timeout=10,
-                )
-                if success:
-                    startup_time = time.time() - start_time
-                    _stop_app(app_dir, template)
-                    return True, {"startup_time_sec": round(startup_time, 1)}
-
-            time.sleep(5)
-
-        # Failed to connect
-        _stop_app(app_dir, template)
-        return False, {}
-
-    except Exception:
+    except Exception as e:
         # Ensure cleanup on any exception
         _stop_app(app_dir, template)
+        print(f"  ⚠️  Exception during runtime check: {e}")
         return False, {}
 
 

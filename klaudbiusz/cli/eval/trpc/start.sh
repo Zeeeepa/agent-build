@@ -26,5 +26,39 @@ if [ ! -f "server/package.json" ]; then
     exit 1
 fi
 
-# Start the app from server directory
-cd server && exec npm start
+# Start the app in background
+cd server && npm start &
+APP_PID=$!
+
+# Wait for app to start (5 seconds for npm apps)
+sleep 5
+
+# Check if process is still running
+if ! kill -0 $APP_PID 2>/dev/null; then
+    echo "❌ Error: Process died during startup" >&2
+    exit 1
+fi
+
+# Health check with retries (3 attempts, 2s timeout each, 1s apart)
+for i in {1..3}; do
+    # Try healthcheck endpoint first
+    if curl -f -s --max-time 2 http://localhost:8000/healthcheck >/dev/null 2>&1; then
+        echo "✅ App ready (healthcheck)" >&2
+        exit 0
+    fi
+
+    # Fallback to root endpoint for npm apps
+    if curl -f -s --max-time 2 http://localhost:8000/ >/dev/null 2>&1; then
+        echo "✅ App ready (root)" >&2
+        exit 0
+    fi
+
+    # Wait before retry (except on last attempt)
+    if [ $i -lt 3 ]; then
+        sleep 1
+    fi
+done
+
+# Failed to connect
+echo "❌ Error: App failed health check" >&2
+exit 1
