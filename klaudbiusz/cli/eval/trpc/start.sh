@@ -45,8 +45,8 @@ if [ ! -f "server/package.json" ]; then
     exit 1
 fi
 
-# Start the app in background
-cd server && npm start &
+# Start the app in background (redirect output to prevent Python subprocess hang)
+cd server && npm start >/dev/null 2>&1 &
 APP_PID=$!
 
 # Wait for app to start (5 seconds for npm apps)
