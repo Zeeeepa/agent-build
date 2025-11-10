@@ -4,6 +4,25 @@ set -e
 # tRPC template start script
 # Runs npm start from server/ directory
 
+# ===== PREREQUISITE CHECKS =====
+# Check if required tools are installed
+MISSING_TOOLS=()
+
+if ! command -v npm &> /dev/null; then
+    MISSING_TOOLS+=("npm")
+fi
+
+if ! command -v curl &> /dev/null; then
+    MISSING_TOOLS+=("curl")
+fi
+
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    echo "❌ Error: Missing required tools: ${MISSING_TOOLS[*]}" >&2
+    echo "   Please install the missing tools and try again." >&2
+    exit 2
+fi
+# ===== END PREREQUISITE CHECKS =====
+
 # Load .env file if it exists (optional - env vars passed from Python)
 if [ -f ".env" ]; then
     export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)

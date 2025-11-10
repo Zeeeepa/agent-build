@@ -4,6 +4,25 @@ set -e
 # Docker template start script
 # Runs Docker container with Databricks environment
 
+# ===== PREREQUISITE CHECKS =====
+# Check if required tools are installed
+MISSING_TOOLS=()
+
+if ! command -v docker &> /dev/null; then
+    MISSING_TOOLS+=("docker")
+fi
+
+if ! command -v curl &> /dev/null; then
+    MISSING_TOOLS+=("curl")
+fi
+
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    echo "❌ Error: Missing required tools: ${MISSING_TOOLS[*]}" >&2
+    echo "   Please install the missing tools and try again." >&2
+    exit 2
+fi
+# ===== END PREREQUISITE CHECKS =====
+
 # Get app name from current directory
 APP_NAME=$(basename "$PWD")
 
