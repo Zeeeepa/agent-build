@@ -19,11 +19,7 @@ from claude_agent_sdk import (
     query,
 )
 from dotenv import load_dotenv
-
 from shared import ScaffoldTracker, Tracker, build_mcp_command, setup_logging, validate_mcp_manifest
-
-if TYPE_CHECKING:
-    pass
 
 try:
     import asyncpg  # type: ignore[import-untyped]
@@ -238,11 +234,7 @@ Use up to 10 tools per call to speed up the process.\n"""
             description=input_dict.get("description", ""),
             prompt=input_dict.get("prompt", ""),
         )
-        self.tracker.log_subagent_invoke(
-            tool_input.subagent_type,
-            tool_input.description,
-            tool_input.prompt
-        )
+        self.tracker.log_subagent_invoke(tool_input.subagent_type, tool_input.description, tool_input.prompt)
 
     async def _log_todo_update(self, block: ToolUseBlock, truncate) -> None:
         input_dict = block.input or {}

@@ -55,13 +55,13 @@ uv run cli/bulk_run.py --backend=litellm --model=gemini/gemini-2.5-pro
 cd klaudbiusz
 
 # Evaluate all apps
-uv run python cli/evaluate_all.py
+uv run cli/evaluate_all.py
 
 # Partial evaluation (filter apps)
-uv run python cli/evaluate_all.py --limit 5                    # First 5 apps
-uv run python cli/evaluate_all.py --apps app1 app2             # Specific apps
-uv run python cli/evaluate_all.py --pattern "customer*"        # Pattern matching
-uv run python cli/evaluate_all.py --skip 10 --limit 5          # Skip first 10, evaluate next 5
+uv run cli/evaluate_all.py --limit 5                    # First 5 apps
+uv run cli/evaluate_all.py --apps app1 app2             # Specific apps
+uv run cli/evaluate_all.py --pattern "customer*"        # Pattern matching
+uv run cli/evaluate_all.py --skip 10 --limit 5          # Skip first 10, evaluate next 5
 
 # Evaluate single app
 uv run cli/evaluate_app.py ../app/customer-churn-analysis
@@ -144,7 +144,7 @@ klaudbiusz/
 
 1. Write natural language prompt
 2. Generate: `uv run cli/single_run.py "your prompt"` or `uv run cli/bulk_run.py`
-3. Evaluate: `uv run python cli/evaluate_all.py`
+3. Evaluate: `uv run cli/evaluate_all.py`
 4. Review: `cat EVALUATION_REPORT.md`
 5. Deploy apps that pass checks
 
