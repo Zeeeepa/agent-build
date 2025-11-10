@@ -549,7 +549,8 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python evaluate_all.py                          # Evaluate all apps
+  python evaluate_all.py                          # Evaluate all apps in ../app
+  python evaluate_all.py --dir /path/to/apps      # Evaluate apps in custom directory
   python evaluate_all.py --apps app1 app2         # Evaluate specific apps
   python evaluate_all.py --pattern "customer*"    # Evaluate apps matching pattern
   python evaluate_all.py --limit 5                # Evaluate first 5 apps
@@ -557,6 +558,12 @@ Examples:
   python evaluate_all.py --start-from app5        # Start from specific app
   python evaluate_all.py --limit 10 --skip 5      # Evaluate 10 apps starting from 6th
         """
+    )
+
+    parser.add_argument(
+        '--dir',
+        metavar='PATH',
+        help='Directory containing apps to evaluate (default: ../app)'
     )
 
     filter_group = parser.add_argument_group('app filtering')
@@ -645,7 +652,12 @@ def main():
     args = parse_args()
 
     script_dir = Path(__file__).parent
-    apps_dir = script_dir.parent / "app"
+
+    # Use custom directory if provided, otherwise default to ../app
+    if args.dir:
+        apps_dir = Path(args.dir).resolve()
+    else:
+        apps_dir = script_dir.parent / "app"
 
     if not apps_dir.exists():
         print(f"Error: Apps directory not found: {apps_dir}")
@@ -661,6 +673,7 @@ def main():
     app_dirs = filter_app_dirs(all_app_dirs, args)
 
     print(f"🔍 Evaluating {len(app_dirs)} apps (out of {len(all_app_dirs)} total)...")
+    print(f"   Directory: {apps_dir}")
     if args.apps:
         print(f"   Filter: specific apps: {', '.join(args.apps)}")
     if args.pattern:
