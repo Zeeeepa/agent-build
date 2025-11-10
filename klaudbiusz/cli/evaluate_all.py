@@ -551,6 +551,7 @@ def parse_args():
 Examples:
   python evaluate_all.py                          # Evaluate all apps in ../app
   python evaluate_all.py --dir /path/to/apps      # Evaluate apps in custom directory
+  python evaluate_all.py --staging                # Report to staging MLflow experiment
   python evaluate_all.py --apps app1 app2         # Evaluate specific apps
   python evaluate_all.py --pattern "customer*"    # Evaluate apps matching pattern
   python evaluate_all.py --limit 5                # Evaluate first 5 apps
@@ -564,6 +565,12 @@ Examples:
         '--dir',
         metavar='PATH',
         help='Directory containing apps to evaluate (default: ../app)'
+    )
+
+    parser.add_argument(
+        '--staging',
+        action='store_true',
+        help='Report results to staging MLflow experiment (/Shared/edda-staging-evaluations)'
     )
 
     filter_group = parser.add_argument_group('app filtering')
@@ -773,11 +780,17 @@ def main():
     try:
         from mlflow_tracker import EvaluationTracker
 
-        tracker = EvaluationTracker()
+        # Determine experiment name based on --staging flag
+        experiment_name = "/Shared/edda-staging-evaluations" if args.staging else None
+
+        tracker = EvaluationTracker(experiment_name=experiment_name)
         if tracker.enabled:
             # Start MLflow run
             run_name = f"eval-{timestamp}"
-            tags = {"mode": "evaluation"}
+            tags = {
+                "mode": "evaluation",
+                "environment": "staging" if args.staging else "production"
+            }
 
             # Add git commit hash if available
             git_hash = get_git_commit_hash()
@@ -807,7 +820,7 @@ def main():
 
             print("✓ MLflow tracking complete")
             print(f"  Run ID: {run_id}")
-            print("  View: ML → Experiments → /Shared/klaudbiusz-evaluations")
+            print(f"  View: ML → Experiments → {tracker.experiment_name}")
         else:
             print("⚠️  MLflow tracking disabled (credentials not set)")
     except Exception as e:
