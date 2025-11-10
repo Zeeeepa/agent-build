@@ -454,109 +454,81 @@ def install_dependencies(app_dir: Path, template: str = "unknown") -> bool:
 
 
 def check_type_safety(app_dir: Path, template: str = "unknown") -> bool:
-    """Metric 3: TypeScript compiles without errors."""
+    """Metric 3: TypeScript compiles without errors.
+
+    Uses template-specific typecheck.sh scripts.
+    """
     print("  [3/7] Checking type safety...")
 
-    # DBX SDK apps: use npm run check
-    if template == "dbx-sdk":
-        package_json = app_dir / "package.json"
-        if not package_json.exists():
-            return False
+    # Determine which template script to use
+    dockerfile = app_dir / "Dockerfile"
+    if dockerfile.exists():
+        script_dir = "docker"
+    elif template == "dbx-sdk":
+        script_dir = "dbx-sdk"
+    elif template == "trpc":
+        script_dir = "trpc"
+    else:
+        # Unknown template - fail
+        print(f"  ⚠️  Unknown template: {template}")
+        return False
 
-        try:
-            import json
-            pkg_data = json.loads(package_json.read_text())
-            scripts = pkg_data.get("scripts", {})
-        except Exception:
-            return False
+    # Get template-specific typecheck script
+    typecheck_script = Path(__file__).parent / "eval" / script_dir / "typecheck.sh"
+    if not typecheck_script.exists():
+        print(f"  ⚠️  Typecheck script not found: {typecheck_script}")
+        return False
 
-        # Use npm run check if available (standard for DBX SDK apps)
-        if "check" in scripts:
-            success, _, _ = run_command(
-                ["npm", "run", "check"],
-                cwd=str(app_dir),
-                timeout=60,
-            )
-        else:
-            # Fallback: run tsc directly
-            success, _, _ = run_command(
-                ["npx", "tsc", "--noEmit", "--skipLibCheck"],
-                cwd=str(app_dir),
-                timeout=60,
-            )
+    # Run typecheck script
+    success, _, _ = run_command(
+        ["bash", str(typecheck_script)],
+        cwd=str(app_dir),
+        timeout=60,
+    )
 
-        return success
-
-    # tRPC apps: check server and client separately
-    server_dir = get_backend_dir(app_dir, template)
-    server_success = True
-    if server_dir.exists() and (server_dir / "tsconfig.json").exists():
-        server_success, _, _ = run_command(
-            ["npx", "tsc", "--noEmit", "--skipLibCheck"],
-            cwd=str(server_dir),
-            timeout=60,
-        )
-
-    client_dir = app_dir / "client" if (app_dir / "client").exists() else app_dir / "frontend"
-    client_success = True
-    if client_dir.exists() and (client_dir / "tsconfig.json").exists():
-        client_success, _, _ = run_command(
-            ["npx", "tsc", "--noEmit", "--skipLibCheck"],
-            cwd=str(client_dir),
-            timeout=60,
-        )
-
-    return server_success and client_success
+    return success
 
 
 def check_tests_pass(app_dir: Path, template: str = "unknown") -> tuple[bool, float, bool]:
     """Metric 4: Tests pass with coverage.
 
-    For DBX SDK: No test infrastructure in template - always fail.
-    For tRPC: Use root package.json test script (runnable from docker).
+    Uses template-specific test.sh scripts.
     """
     print("  [4/7] Checking tests pass...")
 
-    if template == "dbx-sdk":
-        # DBX SDK apps don't have test infrastructure in the template
-        # Report fail for now (no test script in package.json)
+    # Determine which template script to use
+    dockerfile = app_dir / "Dockerfile"
+    if dockerfile.exists():
+        script_dir = "docker"
+    elif template == "dbx-sdk":
+        script_dir = "dbx-sdk"
+    elif template == "trpc":
+        script_dir = "trpc"
+    else:
+        # Unknown template - fail
         return False, 0.0, False
 
-    # tRPC: Use root-level test command (works from docker)
-    # Root package.json has: "test": "cd server && npm test"
-    package_json = app_dir / "package.json"
-    if not package_json.exists():
+    # Get template-specific test script
+    test_script = Path(__file__).parent / "eval" / script_dir / "test.sh"
+    if not test_script.exists():
+        print(f"  ⚠️  Test script not found: {test_script}")
         return False, 0.0, False
 
-    try:
-        import json
-        pkg_data = json.loads(package_json.read_text())
-        scripts = pkg_data.get("scripts", {})
-    except Exception:
-        return False, 0.0, False
-
-    # Check if test script exists
-    if "test" not in scripts:
-        return False, 0.0, False
-
-    # Check for test files in server/src
+    # Check if test files exist (for has_tests flag)
     server_dir = get_backend_dir(app_dir, template)
-    if not server_dir.exists():
-        return False, 0.0, False
+    backend_dir = app_dir / "backend"
+    has_tests = False
 
-    server_src = server_dir / "src"
-    if not server_src.exists():
-        return False, 0.0, False
+    if server_dir.exists() and (server_dir / "src").exists():
+        test_files = list((server_dir / "src").glob("*.test.ts")) + list((server_dir / "src").glob("**/*.test.ts"))
+        has_tests = len(test_files) > 0
+    elif backend_dir.exists() and (backend_dir / "src").exists():
+        test_files = list((backend_dir / "src").glob("*.test.ts")) + list((backend_dir / "src").glob("**/*.test.ts"))
+        has_tests = len(test_files) > 0
 
-    test_files = list(server_src.glob("*.test.ts")) + list(server_src.glob("**/*.test.ts"))
-    has_tests = len(test_files) > 0
-
-    if not has_tests:
-        return False, 0.0, False
-
-    # Run tests from root using the test script (same as docker would)
+    # Run test script
     success, stdout, stderr = run_command(
-        ["npm", "test"],
+        ["bash", str(test_script)],
         cwd=str(app_dir),
         timeout=120,
     )
