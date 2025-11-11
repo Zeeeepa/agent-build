@@ -102,7 +102,7 @@ fn build_overrides_from_cli(cli: &Cli) -> Result<edda_mcp::config::ConfigOverrid
                 return Err(eyre::eyre!(
                     "Invalid template '{}'. Only 'Trpc' is supported via CLI. Use --json for Custom templates.",
                     template_str
-                ))
+                ));
             }
         }
     } else {
@@ -110,8 +110,7 @@ fn build_overrides_from_cli(cli: &Cli) -> Result<edda_mcp::config::ConfigOverrid
     };
 
     // build validation overrides if any field is provided
-    let validation = if cli.validation_command.is_some() || cli.validation_docker_image.is_some()
-    {
+    let validation = if cli.validation_command.is_some() || cli.validation_docker_image.is_some() {
         Some(ValidationConfigOverrides {
             command: cli.validation_command.clone(),
             docker_image: cli.validation_docker_image.clone(),
@@ -230,6 +229,7 @@ async fn check_environment(config: &edda_mcp::config::Config) -> Result<()> {
     let mut all_passed = true;
 
     // load env vars for validation
+    edda_mcp::env::create_env_example()?;
     let env = edda_mcp::env::EnvVars::load()?;
 
     // check docker
@@ -243,12 +243,18 @@ async fn check_environment(config: &edda_mcp::config::Config) -> Result<()> {
     }
 
     // check databricks environment variables only if databricks or deployment is required
-    let databricks_required = config.required_providers.contains(&ProviderType::Databricks)
-        || config.required_providers.contains(&ProviderType::Deployment);
+    let databricks_required = config
+        .required_providers
+        .contains(&ProviderType::Databricks)
+        || config
+            .required_providers
+            .contains(&ProviderType::Deployment);
 
     if databricks_required {
         print!("  Databricks credentials... ");
-        let require_warehouse = config.required_providers.contains(&ProviderType::Deployment);
+        let require_warehouse = config
+            .required_providers
+            .contains(&ProviderType::Deployment);
         match env.validate_databricks(require_warehouse) {
             Ok(_) => {
                 println!("✓");
@@ -270,7 +276,10 @@ async fn check_environment(config: &edda_mcp::config::Config) -> Result<()> {
         }
 
         // check databricks CLI (optional, only if deployment is required)
-        if config.required_providers.contains(&ProviderType::Deployment) {
+        if config
+            .required_providers
+            .contains(&ProviderType::Deployment)
+        {
             print!("  Databricks CLI... ");
             match tokio::process::Command::new("databricks")
                 .arg("--version")
