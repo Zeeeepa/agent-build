@@ -4,6 +4,12 @@ set -e
 # tRPC template test script
 # Runs tests using root-level npm test command
 
+# Source common functions
+source "$(dirname "$0")/common.sh"
+
+# Install dependencies if needed
+install_dependencies
+
 # Check if package.json exists
 if [ ! -f "package.json" ]; then
     echo "❌ Error: No package.json found" >&2

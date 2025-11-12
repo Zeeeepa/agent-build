@@ -4,6 +4,12 @@ set -e
 # tRPC template typecheck script
 # Runs TypeScript type checking separately for server/ and client/
 
+# Source common functions
+source "$(dirname "$0")/common.sh"
+
+# Install dependencies if needed
+install_dependencies
+
 # Check server directory
 if [ -d "server" ] && [ -f "server/tsconfig.json" ]; then
     echo "Checking server types..." >&2

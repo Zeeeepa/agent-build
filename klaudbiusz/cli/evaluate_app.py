@@ -429,14 +429,13 @@ def check_type_safety(app_dir: Path, template: str = "unknown") -> bool:
     """
     print("  [3/7] Checking type safety...")
 
-    # Determine which template script to use
-    dockerfile = app_dir / "Dockerfile"
-    if dockerfile.exists():
-        script_dir = "docker"
-    elif template == "dbx-sdk":
+    # Determine which template script to use (prefer template-specific over docker)
+    if template == "dbx-sdk":
         script_dir = "dbx-sdk"
     elif template == "trpc":
         script_dir = "trpc"
+    elif (app_dir / "Dockerfile").exists():
+        script_dir = "docker"
     else:
         # Unknown template - fail
         print(f"  ⚠️  Unknown template: {template}")
@@ -465,14 +464,13 @@ def check_tests_pass(app_dir: Path, template: str = "unknown") -> tuple[bool, fl
     """
     print("  [4/7] Checking tests pass...")
 
-    # Determine which template script to use
-    dockerfile = app_dir / "Dockerfile"
-    if dockerfile.exists():
-        script_dir = "docker"
-    elif template == "dbx-sdk":
+    # Determine which template script to use (prefer template-specific over docker)
+    if template == "dbx-sdk":
         script_dir = "dbx-sdk"
     elif template == "trpc":
         script_dir = "trpc"
+    elif (app_dir / "Dockerfile").exists():
+        script_dir = "docker"
     else:
         # Unknown template - fail
         return False, 0.0, False

@@ -5,6 +5,12 @@ set -e
 # For Docker apps, we check the source before the Docker build
 # Docker apps are typically built from dbx-sdk or trpc templates
 
+# Source common functions
+source "$(dirname "$0")/common.sh"
+
+# Install dependencies if needed
+install_dependencies
+
 # Try root-level check first (dbx-sdk style)
 if [ -f "package.json" ] && grep -q '"check"' package.json 2>/dev/null; then
     exec npm run check
@@ -21,8 +27,9 @@ if [ -d "server" ] && [ -f "server/tsconfig.json" ]; then
     cd server && npx tsc --noEmit --skipLibCheck && cd ..
 
     # Also check client if exists
-    if [ -d "../client" ] && [ -f "../client/tsconfig.json" ]; then
-        cd ../client && npx tsc --noEmit --skipLibCheck
+    if [ -d "client" ] && [ -f "client/tsconfig.json" ]; then
+        echo "Checking client types..." >&2
+        cd client && npx tsc --noEmit --skipLibCheck
     fi
     exit 0
 fi

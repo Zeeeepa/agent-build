@@ -4,6 +4,12 @@ set -e
 # DBX SDK template typecheck script
 # Runs TypeScript type checking using npm run check or tsc directly
 
+# Source common functions
+source "$(dirname "$0")/common.sh"
+
+# Install dependencies if needed
+install_dependencies
+
 # Verify package.json exists
 if [ ! -f "package.json" ]; then
     echo "❌ Error: No package.json found" >&2

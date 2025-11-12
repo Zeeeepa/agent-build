@@ -5,6 +5,12 @@ set -e
 # For Docker apps, we run tests before the Docker build
 # Docker apps are typically built from dbx-sdk or trpc templates
 
+# Source common functions
+source "$(dirname "$0")/common.sh"
+
+# Install dependencies if needed
+install_dependencies
+
 # Try root-level test (works for both dbx-sdk and trpc)
 if [ -f "package.json" ] && grep -q '"test"' package.json 2>/dev/null; then
     # Check if test files exist
