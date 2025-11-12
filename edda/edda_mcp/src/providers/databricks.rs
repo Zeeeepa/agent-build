@@ -77,8 +77,8 @@ impl DatabricksProvider {
         }
     }
 
-    #[tool(name = "databricks_list_tables", description = "List accessible tables in a Databricks catalog and schema. Supports optional filtering by table name and pagination (default limit: 500).")]
-    pub async fn list_tables(
+    #[tool(name = "databricks_find_tables", description = "Find tables in Databricks by searching across catalogs and schemas. Supports filtering by table name and pagination (default limit: 500). When catalog_name or schema_name is not provided, searches through all available catalogues / schemas.")]
+    pub async fn find_tables(
         &self,
         Parameters(args): Parameters<DatabricksListTablesArgs>,
     ) -> Result<CallToolResult, ErrorData> {
