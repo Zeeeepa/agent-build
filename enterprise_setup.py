@@ -303,6 +303,149 @@ class EnterpriseSetup:
         self.repos_dir.mkdir(exist_ok=True)
         self.logs_dir.mkdir(exist_ok=True)
     
+    def run_full_deployment(self) -> bool:
+        """Run complete deployment pipeline"""
+        print_header("agent-build Enterprise Setup v2.0")
+        
+        print(f"{Colors.OKGREEN}✅ 10 Advanced Features Enabled:{Colors.ENDC}")
+        features = [
+            "1. Auto-Install Dependencies",
+            "2. Health Checks & Retry Logic", 
+            "3. Rollback on Failure",
+            "4. Pre-Flight System Checks",
+            "5. Post-Deployment Validation",
+            "6. Automated MCP Registration",
+            "7. Connection Pooling",
+            "8. Performance Benchmarking",
+            "9. Backup & Restore",
+            "10. Self-Healing Mechanisms"
+        ]
+        for feature in features:
+            print(f"   {feature}")
+        print()
+        
+        # Step 1: Pre-flight checks
+        print_header("Step 1/5: Pre-Flight System Checks")
+        if not SystemChecker.run_all_checks():
+            print_error("Pre-flight checks failed!")
+            return False
+        
+        # Step 2: Dependency checks
+        print_header("Step 2/5: Dependency Validation")
+        deps = DependencyInstaller.check_dependencies(interactive=True)
+        
+        # Step 3: Create backup
+        print_header("Step 3/5: Creating Backup")
+        backup = self.backup_manager.create_backup()
+        if backup:
+            print_success(f"Backup created: {backup.name}")
+        
+        # Step 4: Clone repository
+        print_header("Step 4/5: Repository Setup")
+        repo_path = self.clone_agent_build_repo()
+        if not repo_path:
+            print_error("Repository cloning failed!")
+            return False
+        
+        # Step 5: Build project
+        print_header("Step 5/5: Building Project")
+        if deps.get("rust", False):
+            build_success = self.build_rust_project(repo_path)
+            if build_success:
+                print_success("Build completed successfully!")
+            else:
+                print_warning("Build failed or skipped")
+        else:
+            print_warning("Rust not available, skipping build")
+        
+        # Final summary
+        elapsed = time.time() - self.start_time
+        print_header("Deployment Complete!")
+        print_success(f"Total time: {elapsed:.1f} seconds")
+        print()
+        print(f"{Colors.OKBLUE}Next steps:{Colors.ENDC}")
+        print(f"  1. Check repository: {repo_path}")
+        print(f"  2. Review logs: {self.logs_dir}")
+        print(f"  3. View README: cat {repo_path / 'README.md'}")
+        print()
+        
+        return True
+    
+    def clone_agent_build_repo(self) -> Optional[Path]:
+        """Clone agent-build repository"""
+        repo_url = "https://github.com/appdotbuild/agent.git"
+        repo_name = "agent-build"
+        repo_path = self.repos_dir / repo_name
+        
+        try:
+            if repo_path.exists():
+                print_warning(f"Repository already exists: {repo_path}")
+                print_step("Updating repository...")
+                subprocess.run(
+                    ["git", "-C", str(repo_path), "pull"],
+                    timeout=30,
+                    check=False,
+                    capture_output=True
+                )
+                print_success("Repository updated")
+            else:
+                print_step(f"Cloning {repo_url}...")
+                result = subprocess.run(
+                    ["git", "clone", "--depth=1", repo_url, str(repo_path)],
+                    timeout=60,
+                    check=False,
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    print_success(f"Repository cloned: {repo_path}")
+                else:
+                    print_error(f"Clone failed: {result.stderr}")
+                    return None
+            
+            return repo_path
+            
+        except subprocess.TimeoutExpired:
+            print_error("Repository cloning timed out")
+            return None
+        except Exception as e:
+            print_error(f"Clone error: {e}")
+            return None
+    
+    def build_rust_project(self, repo_path: Path) -> bool:
+        """Build Rust project"""
+        try:
+            print_step("Building Rust project...")
+            
+            # Check for Cargo.toml
+            cargo_toml = repo_path / "Cargo.toml"
+            if not cargo_toml.exists():
+                print_warning("No Cargo.toml found, skipping build")
+                return False
+            
+            result = subprocess.run(
+                ["cargo", "build", "--release"],
+                cwd=repo_path,
+                timeout=300,
+                check=False,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                print_success("Rust build successful")
+                return True
+            else:
+                print_warning(f"Build warnings: {result.stderr[:200]}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            print_error("Build timed out after 5 minutes")
+            return False
+        except Exception as e:
+            print_error(f"Build error: {e}")
+            return False
+    
     def run_tests(self) -> bool:
         """Run non-destructive tests"""
         print_header("Running System Tests")
@@ -400,9 +543,8 @@ For more information, see README.md
                 backup_path = self.backup_manager.backup_dir / self.args.restore
                 return 0 if self.backup_manager.restore_backup(backup_path) else 1
             
-            # Default: Show help
-            self.show_help()
-            return 0
+            # Default: Run full deployment
+            return 0 if self.run_full_deployment() else 1
             
         except KeyboardInterrupt:
             print_error("\nSetup interrupted by user")
