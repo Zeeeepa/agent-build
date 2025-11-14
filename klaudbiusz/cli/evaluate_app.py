@@ -291,7 +291,7 @@ def check_runtime_success(app_dir: Path, container_name: str, template: str = "u
         # Prepare environment variables
         env = _prepare_runtime_env(app_dir, container_name, port)
         if not env.get("DATABRICKS_HOST") or not env.get("DATABRICKS_TOKEN"):
-            print(f"  ⚠️  Missing DATABRICKS_HOST or DATABRICKS_TOKEN")
+            print("  ⚠️  Missing DATABRICKS_HOST or DATABRICKS_TOKEN")
             return False, {}
 
         # Run start script (includes startup, waiting, and health check)
@@ -312,7 +312,7 @@ def check_runtime_success(app_dir: Path, container_name: str, template: str = "u
         else:
             # Show error output from script
             if stderr:
-                print(f"  ⚠️  Startup failed:")
+                print("  ⚠️  Startup failed:")
                 for line in stderr.strip().split('\n')[:5]:
                     print(f"    {line}")
             return False, {}

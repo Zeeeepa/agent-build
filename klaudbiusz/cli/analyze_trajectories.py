@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -8,7 +9,17 @@ from pathlib import Path
 import coloredlogs
 import fire
 import litellm
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    query,
+)
 from dotenv import load_dotenv
+from shared import build_mcp_command, validate_mcp_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -123,48 +134,233 @@ Provide a concise analysis focusing on actionable insights."""
     return response.choices[0].message.content  # type: ignore[attr-defined]
 
 
-async def aggregate_analyses(analyses: list[tuple[str, str]], model: str) -> str:
-    """Aggregate individual analyses to find common patterns (reduce phase)."""
-    combined = "\n\n".join([f"## Analysis of {app_name}\n\n{analysis}" for app_name, analysis in analyses])
+def get_mcp_tools_description(mcp_binary: str | None, project_root: Path) -> str:
+    """Extract MCP tool definitions by querying the MCP server."""
+    mcp_manifest = validate_mcp_manifest(mcp_binary, project_root)
+    command, args = build_mcp_command(mcp_binary, mcp_manifest)
 
-    prompt = f"""Below are individual analyses of multiple agent execution trajectories.
-
-Your task: Identify common patterns, recurring issues, and systemic problems across all trajectories.
-
-Focus on:
-1. What types of errors/struggles appear repeatedly?
-2. Which tools or workflows cause consistent friction?
-3. What architectural or design issues emerge?
-4. What successful patterns are worth reinforcing?
-
-Provide a structured summary with systemic issues and recommendations for improvement where applicable.
-
-Keep in mind that agent itself is not directly controlled, but we can improve the app template scaffoded, validation process and available tools.
-
-{combined}"""
-
-    logger.info("🔄 Aggregating analyses to find common patterns")
-
-    response = await litellm.acompletion(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=16 * 1024,
+    proc = subprocess.Popen(
+        [command, *args],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
-    return response.choices[0].message.content  # type: ignore[attr-defined]
+    init_request = (
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "trajectory-analyzer", "version": "1.0.0"},
+                },
+            }
+        )
+        + "\n"
+    )
+    proc.stdin.write(init_request.encode())
+    proc.stdin.flush()
+
+    init_response_line = proc.stdout.readline().decode().strip()
+    init_response = json.loads(init_response_line)
+    if "result" not in init_response:
+        raise RuntimeError(f"Initialize failed: {init_response}")
+
+    notification = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
+    proc.stdin.write(notification.encode())
+    proc.stdin.flush()
+
+    tools_request = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n"
+    proc.stdin.write(tools_request.encode())
+    proc.stdin.flush()
+
+    tools_response_line = proc.stdout.readline().decode().strip()
+    tools_response = json.loads(tools_response_line)
+
+    proc.terminate()
+    proc.wait(timeout=5)
+
+    if "result" not in tools_response:
+        raise RuntimeError(f"tools/list failed: {tools_response}")
+
+    tools = tools_response["result"].get("tools", [])
+    lines = ["# MCP Tools\n"]
+    for tool in tools:
+        name = tool.get("name", "unknown")
+        description = tool.get("description", "")
+        lines.append(f"## {name}\n")
+        lines.append(f"{description}\n")
+        if "inputSchema" in tool:
+            schema = tool["inputSchema"]
+            props = schema.get("properties", {})
+            if props:
+                lines.append("\n**Parameters:**\n")
+                for prop_name, prop_info in props.items():
+                    prop_desc = prop_info.get("description", "")
+                    lines.append(f"- `{prop_name}`: {prop_desc}\n")
+        lines.append("\n")
+    return "".join(lines)
+
+
+def load_evaluation_report(eval_report_path: str | None) -> str:
+    """Load evaluation report JSON, drop app_dir and timestamp fields."""
+    if not eval_report_path:
+        return ""
+
+    eval_path = Path(eval_report_path)
+    if not eval_path.exists():
+        logger.warning(f"Evaluation report not found: {eval_report_path}")
+        return ""
+
+    with eval_path.open() as f:
+        eval_data = json.load(f)
+
+    if "apps" in eval_data:
+        for app in eval_data["apps"]:
+            app.pop("app_dir", None)
+            app.pop("timestamp", None)
+
+    return json.dumps(eval_data, indent=2)
+
+
+async def analyze_with_agent(
+    concatenated_analyses: str,
+    mcp_tools_doc: str,
+    template_path: Path,
+    eval_report: str = "",
+) -> str:
+    """Use Claude Agent to analyze trajectories and provide recommendations."""
+    logger.info("🤖 Spawning analysis agent to explore template and provide recommendations")
+
+    disallowed_tools = [
+        "Write",
+        "Edit",
+        "Bash",
+        "NotebookEdit",
+        "WebSearch",
+        "WebFetch",
+        "TodoWrite",
+        "Task",
+        "SlashCommand",
+        "Skill",
+        "AskUserQuestion",
+        "ExitPlanMode",
+        "KillShell",
+        "BashOutput",
+        "Upload",
+    ]
+
+    eval_section = ""
+    if eval_report:
+        eval_section = f"""
+
+---
+
+# Evaluation Report
+
+{eval_report}
+
+---
+"""
+
+    base_instructions = f"""You are analyzing AI agent execution trajectories for a Databricks app generator.
+
+**Your task**: Provide actionable recommendations in three categories:
+1. **Template improvements**: Changes to template structure, CLAUDE.md guidance, or scaffolding
+2. **Tool improvements**: Missing tools, unclear descriptions, or tool definition issues
+3. **Root cause analysis**: Why agents failed or struggled in specific trajectories
+
+**Context provided**:
+- Trajectory analyses (below)
+- MCP tool definitions (below)
+- Template source code at: {template_path}
+{"- Evaluation metrics (below)" if eval_report else ""}
+
+**Instructions**:
+- Use Read, Glob, Grep to explore the template structure
+- Focus on systemic issues, not one-off failures
+- Be specific: reference file paths, tool names, trajectory patterns
+- Format recommendations as markdown with clear sections
+
+---
+
+# Trajectory Analyses
+
+{concatenated_analyses}
+
+---
+
+{mcp_tools_doc}{eval_section}
+
+---
+
+Explore the template and provide your analysis."""
+
+    options = ClaudeAgentOptions(
+        system_prompt=base_instructions,
+        permission_mode="bypassPermissions",
+        disallowed_tools=disallowed_tools,
+        allowed_tools=[
+            "Read",
+            "Glob",
+            "Grep",
+        ],
+        max_turns=50,
+    )
+
+    final_result: str | None = None
+    async for message in query(prompt="Analyze trajectories and provide recommendations.", options=options):
+        match message:
+            case AssistantMessage():
+                for block in message.content:
+                    match block:
+                        case TextBlock():
+                            text_preview = block.text[:200] if len(block.text) > 200 else block.text
+                            logger.info(f"💭 Agent: {text_preview}{'...' if len(block.text) > 200 else ''}")
+                        case ToolUseBlock():
+                            args = block.input or {}
+                            params = ", ".join(f"{k}={str(v)[:200]}" for k, v in args.items())
+                            truncated = params if len(params) <= 200 else params[:200] + "..."
+                            logger.info(f"🔧 Tool: {block.name}({truncated})")
+            case ToolResultBlock(is_error=True):
+                logger.warning(f"⚠️ Tool error: {str(block.content)[:200]}")
+            case ToolResultBlock():
+                pass
+            case ResultMessage(result=result):
+                final_result = result
+                logger.info("✅ Agent completed analysis and produced final report")
+
+    if final_result is None:
+        raise RuntimeError("Agent did not produce a final report")
+
+    return final_result
 
 
 async def analyze_trajectories_async(
+    mcp_binary: str,
+    template_path: str,
     map_model: str = "anthropic/claude-haiku-4-5",
-    reduce_model: str = "anthropic/claude-sonnet-4-5",
     output_file: str = "",
     trajectories_pattern: str = "./app/*/trajectory.jsonl",
+    eval_report_path: str | None = None,
 ):
-    """Analyze trajectories using map-reduce approach with LLM."""
+    """Analyze trajectories using map-reduce approach with LLM, then agent-based analysis."""
     litellm.drop_params = True
 
-    # find all trajectory files
+    template_path_resolved = Path(template_path)
+    project_root = Path(__file__).parent.parent.parent
+
+    logger.info("📋 Extracting MCP tool definitions")
+    mcp_tools_doc = get_mcp_tools_description(mcp_binary, project_root)
+
+    eval_report = ""
+    if eval_report_path:
+        logger.info(f"📊 Loading evaluation report: {eval_report_path}")
+        eval_report = load_evaluation_report(eval_report_path)
+
     trajectory_paths = list(Path(".").glob(trajectories_pattern))
     if not trajectory_paths:
         logger.error(f"No trajectories found matching: {trajectories_pattern}")
@@ -172,7 +368,6 @@ async def analyze_trajectories_async(
 
     logger.info(f"Found {len(trajectory_paths)} trajectories to analyze")
 
-    # map phase: analyze each trajectory concurrently
     trajectory_data = [
         (path.parent.name, format_trajectory_to_markdown(load_trajectory(path))) for path in trajectory_paths
     ]
@@ -183,36 +378,34 @@ async def analyze_trajectories_async(
     analysis_results = await asyncio.gather(*tasks)
     analyses = list(zip([name for name, _ in trajectory_data], analysis_results))
 
-    # reduce phase: aggregate patterns
-    final_report = await aggregate_analyses(analyses, reduce_model)
+    concatenated = "\n\n".join([f"## Analysis of {app_name}\n\n{analysis}" for app_name, analysis in analyses])
 
-    # output results
-    print("\n" + "=" * 80)
-    print("TRAJECTORY ANALYSIS REPORT")
-    print("=" * 80 + "\n")
-    print(final_report)
-    print("\n" + "=" * 80 + "\n")
+    final_report = await analyze_with_agent(concatenated, mcp_tools_doc, template_path_resolved, eval_report)
 
     output_file = output_file or f"/tmp/trajectory_analysis_{datetime.now().strftime('%d%m%y-%H%M%S')}.md"
 
-    # save to file
     output_path = Path(output_file)
     output_path.write_text(final_report)
     logger.info(f"💾 Report saved to: {output_path}")
 
 
 def cli(
+    mcp_binary: str,
+    template_path: str,
     trajectories_pattern: str = "./app/*/trajectory.jsonl",
-    output_file: str | None = "",
+    output_file: str = "",
     map_model: str = "anthropic/claude-haiku-4-5",
-    reduce_model: str = "anthropic/claude-sonnet-4-5",
+    eval_report: str | None = None,
 ):
     """Analyze agent trajectories to find friction points and patterns.
 
     Args:
+        mcp_binary: Path to MCP binary (required)
+        template_path: Path to template directory (required)
         trajectories_pattern: Glob pattern to find trajectory files
-        model: LiteLLM model identifier
         output_file: Path to save analysis report
+        map_model: LiteLLM model identifier for individual trajectory analysis
+        eval_report: Path to evaluation report JSON (optional)
     """
     coloredlogs.install(
         level=logging.INFO,
@@ -220,9 +413,10 @@ def cli(
         logger=logger,
     )
 
-    # suppress litellm logs
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-    asyncio.run(analyze_trajectories_async(map_model, reduce_model, output_file, trajectories_pattern))
+    asyncio.run(
+        analyze_trajectories_async(mcp_binary, template_path, map_model, output_file, trajectories_pattern, eval_report)
+    )
 
 
 if __name__ == "__main__":
