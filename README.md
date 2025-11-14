@@ -436,41 +436,51 @@ getTripsByPaymentType: t.procedure.query(async () => {
 
 ### Features Overview
 
-**Interactive Configuration:**
+**Tested CLI Output:**
 ```bash
-$ python3 enterprise_setup.py
+$ python3 enterprise_setup.py --test
 
 ================================================================================
-                       agent-build Enterprise Setup v2.0                      
+                              Running System Tests                              
 ================================================================================
 
-✅ 10 Advanced Features Enabled:
-   1. Auto-Install Dependencies
-   2. Health Checks & Retry Logic
-   3. Rollback on Failure
-   4. Pre-Flight System Checks
-   5. Post-Deployment Validation
-   6. Automated MCP Registration
-   7. Connection Pooling
-   8. Performance Benchmarking
-   9. Backup & Restore
-   10. Self-Healing Mechanisms
-
-▶ Step 1: Pre-Flight Checks
-✓ Python 3.9.7 detected
-✓ Disk space: 15.3 GB available
+▶ Running Pre-Flight System Checks
+✓ Python 3.13.7 detected
+✓ Disk space: 512.0 GB available
 ✓ Network connectivity confirmed
-✓ Git 2.34.1 detected
+✓ Git detected: git version 2.39.5
+✓ All pre-flight checks passed
 
-▶ Step 2: Environment Configuration
+▶ Checking Dependencies
+✓ Docker: Docker version 28.3.3, build 980b856
+⚠ Rust/Cargo not found (optional)
 
-Required Variables:
+▶ Testing backup system
+▶ Creating backup: test_backup
+✓ Backup system working
 
-ANTHROPIC_AUTH_TOKEN (secret)
-  Z.ai API Key for Claude Code
-  > ************************************
+✓ All tests passed!
+```
 
-... (continues)
+**Available Commands:**
+```bash
+# Show help
+$ python3 enterprise_setup.py --help
+
+# Run tests
+$ python3 enterprise_setup.py --test
+
+# Show version
+$ python3 enterprise_setup.py --version
+
+# Create backup
+$ python3 enterprise_setup.py --backup
+
+# List backups
+$ python3 enterprise_setup.py --list-backups
+
+# Restore from backup
+$ python3 enterprise_setup.py --restore backup_20250114_143025
 ```
 
 ### Configuration Variables
