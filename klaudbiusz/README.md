@@ -44,6 +44,19 @@ uv run cli/bulk_run.py --prompts=test
 
 # Batch generate with LiteLLM backend
 uv run cli/bulk_run.py --backend=litellm --model=gemini/gemini-2.5-pro
+
+# Custom output directory
+uv run cli/bulk_run.py --output-dir=/path/to/custom/folder
+
+# Custom MCP binary (for testing modified edda_mcp)
+uv run cli/bulk_run.py --mcp-binary=/path/to/custom/edda_mcp
+
+# Combined example
+uv run cli/bulk_run.py \
+  --backend=litellm \
+  --model=gemini/gemini-2.5-pro \
+  --output-dir=./my-apps \
+  --mcp-binary=../edda/target/release/edda_mcp
 ```
 
 ### Evaluate Generated Apps

@@ -90,6 +90,7 @@ class ClaudeAppBuilder:
         suppress_logs: bool = False,
         use_subagents: bool = False,
         mcp_binary: str | None = None,
+        output_dir: str | None = None,
     ):
         load_dotenv()
         self.project_root = Path(__file__).parent.parent.parent
@@ -101,6 +102,7 @@ class ClaudeAppBuilder:
         self.use_subagents = use_subagents
         self.suppress_logs = suppress_logs
         self.mcp_binary = mcp_binary
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "app"
         self.tracker = Tracker(self.run_id, app_name, suppress_logs)
         self.scaffold_tracker = ScaffoldTracker()
 
@@ -183,7 +185,7 @@ Use up to 10 tools per call to speed up the process.\n"""
 
         # inject app_name into user prompt to avoid caching issues with system prompt
         # use absolute path for MCP tool (scaffold_data_app requires absolute path)
-        app_dir = Path.cwd() / "app" / self.app_name
+        app_dir = self.output_dir / self.app_name
         user_prompt = f"App name: {self.app_name}\nApp directory: {app_dir}\n\nTask: {prompt}"
 
         try:

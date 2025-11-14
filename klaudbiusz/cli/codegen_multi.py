@@ -268,11 +268,13 @@ class LiteLLMAppBuilder:
         model: str,
         mcp_binary: str | None = None,
         suppress_logs: bool = False,
+        output_dir: str | None = None,
     ):
         self.app_name = app_name
         self.model = model
         self.mcp_binary = mcp_binary
         self.suppress_logs = suppress_logs
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "app"
         litellm.drop_params = True
 
     def _build_system_prompt(self) -> str:
@@ -331,7 +333,7 @@ Be concise and to the point."""
             await agent.initialize()
 
             # compute absolute path for MCP tool (scaffold_data_app requires absolute path)
-            app_dir = Path.cwd() / "app" / self.app_name
+            app_dir = self.output_dir / self.app_name
             user_prompt = f"App name: {self.app_name}\nApp directory: {app_dir}\n\nTask: {prompt}"
             metrics = await agent.run(user_prompt)
 

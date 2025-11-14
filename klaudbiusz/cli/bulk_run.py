@@ -46,6 +46,7 @@ def run_single_generation(
     use_subagents: bool = False,
     suppress_logs: bool = True,
     mcp_binary: str | None = None,
+    output_dir: str | None = None,
 ) -> RunResult:
     # re-apply litellm patch in worker process (joblib uses spawn/fork)
     if backend == "litellm":
@@ -67,6 +68,7 @@ def run_single_generation(
                     suppress_logs=suppress_logs,
                     use_subagents=use_subagents,
                     mcp_binary=mcp_binary,
+                    output_dir=output_dir,
                 )
                 metrics = codegen.run(prompt, wipe_db=wipe_db)
                 app_dir = metrics.get("app_dir") if metrics else None
@@ -74,7 +76,7 @@ def run_single_generation(
                 if not model:
                     raise ValueError("--model is required when using --backend=litellm")
                 builder = LiteLLMAppBuilder(
-                    app_name=app_name, model=model, mcp_binary=mcp_binary, suppress_logs=suppress_logs
+                    app_name=app_name, model=model, mcp_binary=mcp_binary, suppress_logs=suppress_logs, output_dir=output_dir
                 )
                 litellm_metrics = builder.run(prompt)
                 # convert LiteLLM metrics to dict format matching Claude SDK
@@ -128,6 +130,7 @@ def main(
     n_jobs: int = -1,
     use_subagents: bool = False,
     mcp_binary: str | None = None,
+    output_dir: str | None = None,
 ) -> None:
     """Bulk app generation from predefined prompt sets.
 
@@ -139,6 +142,7 @@ def main(
         n_jobs: Number of parallel jobs (-1 for all cores)
         use_subagents: Whether to enable subagent delegation (claude backend only)
         mcp_binary: Optional path to pre-built edda-mcp binary (default: use cargo run)
+        output_dir: Custom output directory for generated apps (default: ./app)
 
     Usage:
         # Claude backend (default) with databricks prompts (default)
@@ -150,6 +154,12 @@ def main(
         # LiteLLM backend
         python bulk_run.py --backend=litellm --model=openrouter/minimax/minimax-m2
         python bulk_run.py --prompts=test --backend=litellm --model=gemini/gemini-2.5-pro
+
+        # Custom output directory
+        python bulk_run.py --output-dir=/path/to/custom/folder
+
+        # Custom MCP binary
+        python bulk_run.py --mcp-binary=/path/to/edda_mcp
 
         # Optional: Run screenshots after generation
         python screenshot.py ./app --concurrency=5 --wait-time=120000
@@ -183,12 +193,13 @@ def main(
     if backend == "claude":
         print(f"Wipe DB: {wipe_db}")
         print(f"Use subagents: {use_subagents}")
-    print(f"MCP binary: {mcp_binary if mcp_binary else 'cargo run (default)'}\n")
+    print(f"MCP binary: {mcp_binary if mcp_binary else 'cargo run (default)'}")
+    print(f"Output dir: {output_dir if output_dir else './app (default)'}\n")
 
     # generate all apps
     results: list[RunResult] = Parallel(n_jobs=n_jobs, backend="loky", verbose=10)(  # type: ignore[assignment]
         delayed(run_single_generation)(
-            app_name, prompt, backend, model, wipe_db, use_subagents, suppress_logs, mcp_binary
+            app_name, prompt, backend, model, wipe_db, use_subagents, suppress_logs, mcp_binary, output_dir
         )
         for app_name, prompt in selected_prompts.items()
     )
