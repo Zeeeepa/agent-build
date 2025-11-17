@@ -834,6 +834,11 @@ async def main_async():
                     )
                     if result_dict is not None:
                         results.append(result_dict)
+
+        # Warn about disconnection delay for large batches (Dagger has 5min hardcoded timeout)
+        if len(app_dirs) >= 5:
+            print("\n⏳ Disconnecting from Dagger (may take up to 5 minutes)...")
+
     except subprocess.TimeoutExpired as e:
         # Dagger session cleanup timed out, but evaluations completed successfully
         # This is a known issue with Dagger SDK - the cleanup can take longer than the 300s timeout

@@ -223,8 +223,6 @@ class LiteLLMAgent:
 
         # Save generation_metrics.json to app directory for evaluation
         if self.scaffold_tracker.app_dir:
-            from pathlib import Path
-            import json
             metrics_file = Path(self.scaffold_tracker.app_dir) / "generation_metrics.json"
             metrics_file.write_text(json.dumps({
                 "cost_usd": total_cost,
