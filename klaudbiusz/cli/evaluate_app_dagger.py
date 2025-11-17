@@ -302,6 +302,25 @@ async def evaluate_app_async(
         issues.append(f"Evaluation error: {str(e)}")
         print(f"  ⚠️  Exception during evaluation: {e}")
 
+    # Calculate efficiency metric (run even if evaluation failed)
+    try:
+        import json
+        from eval_metrics import eff_units
+        generation_metrics_file = app_dir / "generation_metrics.json"
+        if generation_metrics_file.exists():
+            generation_metrics = json.loads(generation_metrics_file.read_text())
+            tokens = generation_metrics.get("input_tokens", 0) + generation_metrics.get("output_tokens", 0)
+            turns = generation_metrics.get("turns")
+            validations = generation_metrics.get("validation_runs")
+
+            metrics.eff_units = eff_units(
+                tokens_used=tokens if tokens > 0 else None,
+                agent_turns=turns,
+                validation_runs=validations
+            )
+    except Exception as e:
+        print(f"  ⚠️  Could not calculate efficiency: {e}")
+
     print(f"\nIssues: {len(issues)}")
 
     return EvalResult(
