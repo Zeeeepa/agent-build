@@ -5,7 +5,10 @@ which breaks when using joblib/multiprocessing. This is a known bug tracked at:
 https://github.com/BerriAI/litellm/issues/14521
 
 Workaround: detach the queue from the logging worker to prevent event loop binding errors.
+Also suppresses verbose INFO logs that create duplicates due to handler conflicts.
 """
+
+import logging
 
 
 def patch_litellm_for_multiprocessing():
@@ -15,6 +18,7 @@ def patch_litellm_for_multiprocessing():
     # disable all callback infrastructure
     litellm.turn_off_message_logging = True
     litellm.drop_params = True
+    litellm.suppress_debug_info = True  # suppress print() statements like "Provider List: ..."
     litellm.success_callback = []
     litellm.failure_callback = []
     litellm._async_success_callback = []
@@ -28,3 +32,8 @@ def patch_litellm_for_multiprocessing():
         GLOBAL_LOGGING_WORKER._queue = None
     except Exception:
         pass  # ignore if litellm internals change
+
+    # suppress verbose litellm INFO logs (duplicates due to handler conflicts)
+    logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+    logging.getLogger('LiteLLM Proxy').setLevel(logging.WARNING)
+    logging.getLogger('LiteLLM Router').setLevel(logging.WARNING)

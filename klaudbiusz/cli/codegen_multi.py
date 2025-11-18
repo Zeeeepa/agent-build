@@ -11,9 +11,12 @@ from uuid import uuid4
 import fire
 import litellm
 from dotenv import load_dotenv
+from litellm_multiprocess_fix import patch_litellm_for_multiprocessing
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from shared import ScaffoldTracker, Tracker, build_mcp_command, setup_logging, validate_mcp_manifest
+
+patch_litellm_for_multiprocessing()
 
 logger = logging.getLogger(__name__)
 
