@@ -979,6 +979,35 @@ async def main_async():
             tracker.log_artifact_file(str(md_output))
             tracker.log_artifact_file(str(csv_output))
 
+            # Log trajectory files for each app
+            print("📝 Logging trajectories...")
+            trajectories_logged = 0
+            traces_logged = 0
+            for app in full_report.get('apps', []):
+                app_dir_path = Path(app.get('app_dir', ''))
+                if app_dir_path.exists():
+                    trajectory_file = app_dir_path / "trajectory.jsonl"
+                    if trajectory_file.exists():
+                        app_name = app.get('app_name', 'unknown')
+                        try:
+                            # Log trajectory as artifact
+                            tracker.log_artifact_file(
+                                str(trajectory_file),
+                                artifact_path=f"trajectories/{app_name}"
+                            )
+                            trajectories_logged += 1
+
+                            # Log trajectory as MLflow Trace
+                            tracker.log_trajectory_trace(str(trajectory_file), app_name)
+                            traces_logged += 1
+                        except Exception as e:
+                            print(f"  ⚠️  Failed to log trajectory for {app_name}: {e}")
+
+            if trajectories_logged > 0:
+                print(f"✓ Logged {trajectories_logged} trajectory artifacts")
+            if traces_logged > 0:
+                print(f"✓ Logged {traces_logged} traces to Traces tab")
+
             # End run
             tracker.end_run()
 

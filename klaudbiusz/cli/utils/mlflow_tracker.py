@@ -289,6 +289,93 @@ class EvaluationTracker:
         except Exception as e:
             print(f"⚠️  Failed to log artifacts from {dir_path}: {e}")
 
+    def log_trajectory_trace(self, trajectory_file: str, app_name: str):
+        """
+        Log trajectory as MLflow Trace for visualization in Traces tab.
+
+        Args:
+            trajectory_file: Path to trajectory.jsonl file
+            app_name: Name of the app for trace naming
+        """
+        if not self.enabled:
+            return
+
+        try:
+            import json
+            from pathlib import Path
+
+            trajectory_path = Path(trajectory_file)
+            if not trajectory_path.exists():
+                return
+
+            # Read trajectory messages
+            messages = []
+            with trajectory_path.open() as f:
+                for line in f:
+                    messages.append(json.loads(line))
+
+            # Log as MLflow trace with expanded content
+            with mlflow.start_span(name=f"agent_execution_{app_name}") as span:
+                span.set_inputs({
+                    "app_name": app_name,
+                    "total_messages": len(messages)
+                })
+
+                # Log each message with full details
+                for i, msg in enumerate(messages, 1):
+                    step_key = f"step_{i:03d}"
+                    role = msg.get("role", "unknown")
+
+                    # Basic attributes
+                    span.set_attribute(f"{step_key}.role", role)
+                    span.set_attribute(f"{step_key}.timestamp", msg.get("timestamp", ""))
+
+                    # Content (truncate if too long)
+                    if msg.get("content"):
+                        content = str(msg["content"])
+                        # Truncate to 1000 chars to avoid attribute size limits
+                        if len(content) > 1000:
+                            content = content[:1000] + "...[truncated]"
+                        span.set_attribute(f"{step_key}.content", content)
+
+                    # Tool calls
+                    if msg.get("tool_calls"):
+                        tool_calls = msg["tool_calls"]
+                        span.set_attribute(f"{step_key}.tool_count", len(tool_calls))
+                        for j, tool_call in enumerate(tool_calls):
+                            tool_key = f"{step_key}.tool_{j+1}"
+                            span.set_attribute(f"{tool_key}.name", tool_call.get("name", "unknown"))
+                            # Log tool arguments as JSON string (truncated)
+                            if tool_call.get("arguments"):
+                                args_str = json.dumps(tool_call["arguments"])
+                                if len(args_str) > 500:
+                                    args_str = args_str[:500] + "...[truncated]"
+                                span.set_attribute(f"{tool_key}.arguments", args_str)
+
+                    # Tool results
+                    if msg.get("tool_results"):
+                        tool_results = msg["tool_results"]
+                        span.set_attribute(f"{step_key}.result_count", len(tool_results))
+                        for j, result in enumerate(tool_results):
+                            result_key = f"{step_key}.result_{j+1}"
+                            span.set_attribute(f"{result_key}.is_error", result.get("is_error", False))
+                            # Log result content (truncated)
+                            if result.get("content"):
+                                content_str = str(result["content"])
+                                if len(content_str) > 500:
+                                    content_str = content_str[:500] + "...[truncated]"
+                                span.set_attribute(f"{result_key}.content", content_str)
+
+                span.set_outputs({
+                    "total_steps": len(messages),
+                    "assistant_messages": sum(1 for m in messages if m.get("role") == "assistant"),
+                    "tool_calls": sum(len(m.get("tool_calls", [])) for m in messages),
+                    "tool_results": sum(len(m.get("tool_results", [])) for m in messages),
+                })
+
+        except Exception as e:
+            print(f"  ⚠️  Failed to log trace for {app_name}: {e}")
+
     def end_run(self, status: str = "FINISHED"):
         """
         End the current MLflow run.
