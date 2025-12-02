@@ -1696,7 +1696,7 @@ wheels = [
 [[package]]
 name = "klaudbiusz"
 version = "0.1.0"
-source = { virtual = "klaudbiusz" }
+source = { editable = "klaudbiusz" }
 dependencies = [
     { name = "anthropic" },
     { name = "asyncpg" },

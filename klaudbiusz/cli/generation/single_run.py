@@ -62,7 +62,7 @@ def run(
     )
 
     try:
-        app_dir, log_file = asyncio.run(
+        app_dir, log_file, metrics = asyncio.run(
             generator.generate_single(prompt, app_name, backend, model, mcp_args)
         )
     finally:
@@ -75,6 +75,8 @@ def run(
     else:
         print("No app generated (agent may have just answered without creating files)")
     print(f"  Log: {log_file}")
+    if metrics:
+        print(f"  Cost: ${metrics['cost_usd']:.4f} ({metrics['input_tokens']} in / {metrics['output_tokens']} out)")
     print(f"{'=' * 80}\n")
 
     return {"app_dir": str(app_dir) if app_dir else None, "log_file": str(log_file)}

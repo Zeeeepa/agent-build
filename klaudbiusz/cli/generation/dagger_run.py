@@ -131,8 +131,13 @@ class DaggerAppGenerator:
         if mcp_args:
             cmd.append(f"--mcp_args={json.dumps(mcp_args)}")
 
-        # ensure log directory exists
-        container = base_container.with_exec(["mkdir", "-p", "/workspace/logs"])
+        # mount cache volume for python deps (safe for concurrent access)
+        # note: npm cache is NOT cached to avoid corruption under parallel execution
+        # npm packages are already optimized via BuildKit cache mounts in Dockerfile
+        python_cache = client.cache_volume("klaudbiusz-python-cache")
+        container = base_container.with_mounted_cache(
+            "/home/klaudbiusz/.cache", python_cache, owner="klaudbiusz:klaudbiusz"
+        )
 
         # run generation
         result = container.with_exec(cmd)
