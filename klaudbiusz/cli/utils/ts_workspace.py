@@ -68,6 +68,7 @@ async def create_ts_workspace(
     # Pass Databricks credentials from host environment
     databricks_host = os.getenv("DATABRICKS_HOST", "")
     databricks_token = os.getenv("DATABRICKS_TOKEN", "")
+    databricks_warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID", "")
 
     if databricks_host:
         workspace.ctr = workspace.ctr.with_env_variable("DATABRICKS_HOST", databricks_host)
@@ -78,7 +79,7 @@ async def create_ts_workspace(
     workspace.ctr = workspace.ctr.with_env_variable("DATABRICKS_CLIENT_ID", "eval-mock-client-id")
     workspace.ctr = workspace.ctr.with_env_variable("DATABRICKS_CLIENT_SECRET", "eval-mock-client-secret")
     workspace.ctr = workspace.ctr.with_env_variable("DATABRICKS_APP_NAME", app_dir.name)
-    workspace.ctr = workspace.ctr.with_env_variable("DATABRICKS_WAREHOUSE_ID", "")
+    workspace.ctr = workspace.ctr.with_env_variable("DATABRICKS_WAREHOUSE_ID", databricks_warehouse_id)
     workspace.ctr = workspace.ctr.with_env_variable("FLASK_RUN_HOST", "0.0.0.0")
 
     # Expose port for health checks
