@@ -1,7 +1,11 @@
 """Simplified Dagger utilities for klaudbiusz evaluation."""
 
-import dagger
-from typing import Self
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Self
+
+if TYPE_CHECKING:
+    import dagger
 
 
 class ExecResult:
