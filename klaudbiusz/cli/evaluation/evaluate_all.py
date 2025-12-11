@@ -738,6 +738,208 @@ def filter_app_dirs(app_dirs: list[Path], args) -> list[Path]:
     return filtered
 
 
+async def _save_results_and_log_mlflow(
+    results: list,
+    app_dirs: list,
+    args,
+    eval_duration: float,
+    script_dir: Path,
+    gen_metrics: dict,
+):
+    """Save results to files and log to MLflow. Extracted to call from both local and Dagger paths."""
+    print("\n" + "=" * 60)
+    print(f"✅ Evaluated {len(results)}/{len(app_dirs)} apps in {eval_duration:.1f}s")
+    if args.parallel > 1:
+        estimated_sequential = eval_duration * args.parallel
+        print(f"   ⚡ Parallelization saved ~{estimated_sequential - eval_duration:.1f}s (speedup: {estimated_sequential/eval_duration:.1f}x)")
+
+    # Generate summary and report (filter out None results)
+    valid_results = [r for r in results if r is not None]
+    print(f"\n📊 Generating summary report for {len(valid_results)} apps...")
+    summary = generate_summary_report(valid_results)
+    markdown = generate_markdown_report(valid_results, summary)
+
+    # Determine output paths - save to app-eval directory
+    output_dir = script_dir.parent / "app-eval"
+    output_dir.mkdir(exist_ok=True)
+
+    # Rename existing evaluation files before creating new ones
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    old_files = [
+        (output_dir / "evaluation_report.json", f"evaluation_report_{timestamp}.json"),
+        (output_dir / "evaluation_report.csv", f"evaluation_report_{timestamp}.csv"),
+        (output_dir / "EVALUATION_REPORT.md", f"EVALUATION_REPORT_{timestamp}.md"),
+    ]
+
+    for old_file, new_name in old_files:
+        if old_file.exists():
+            renamed = old_file.parent / new_name
+            old_file.rename(renamed)
+            print(f"  Preserved: {old_file.name} → {new_name}")
+
+    json_output = output_dir / "evaluation_report.json"
+    md_output = output_dir / "EVALUATION_REPORT.md"
+
+    # Save full results
+    full_report = {
+        "summary": summary,
+        "apps": valid_results,
+        "timestamp": timestamp,
+        "evaluation_run_id": timestamp,
+    }
+    json_output.write_text(json.dumps(full_report, indent=2))
+    print(f"✓ JSON report saved: {json_output}")
+
+    # Save markdown report
+    md_output.write_text(markdown)
+    print(f"✓ Markdown report saved: {md_output}")
+
+    # Save CSV report
+    csv_output = output_dir / "evaluation_report.csv"
+    csv_content = generate_csv_report(valid_results)
+    csv_output.write_text(csv_content)
+    print(f"✓ CSV report saved: {csv_output}")
+
+    # Log to MLflow
+    print("\n📊 Logging to MLflow...")
+    try:
+        from cli.utils.mlflow_tracker import EvaluationTracker
+
+        # Determine experiment name: explicit > staging suffix > default
+        experiment_name = getattr(args, 'experiment_name', None)
+        if experiment_name:
+            if args.staging and not experiment_name.endswith("-staging"):
+                experiment_name = experiment_name.rstrip("/") + "-staging"
+        elif args.staging:
+            experiment_name = "/Shared/klaudbiusz-staging-evaluations"
+        else:
+            experiment_name = None  # Use default from mlflow_tracker
+
+        tracker = EvaluationTracker(experiment_name=experiment_name)
+        if tracker.enabled:
+            # Start MLflow run
+            run_name = f"eval-{timestamp}"
+            tags = {
+                "mode": "evaluation",
+                "environment": "staging" if args.staging else "production"
+            }
+
+            # Add git commit hash if available
+            git_hash = get_git_commit_hash()
+            if git_hash:
+                tags["git_commit"] = git_hash
+
+            run_id = tracker.start_run(run_name=run_name, tags=tags)
+
+            # Log parameters
+            params = {
+                "mode": "evaluation",
+                "total_apps": summary['total_apps'],
+                "timestamp": timestamp,
+                "model_version": "claude-sonnet-4-5-20250929",
+            }
+
+            tracker.log_evaluation_parameters(**params)
+
+            # Log metrics from evaluation report
+            tracker.log_evaluation_metrics(full_report)
+
+            # Log artifacts
+            tracker.log_artifact_file(str(json_output))
+            tracker.log_artifact_file(str(md_output))
+            tracker.log_artifact_file(str(csv_output))
+
+            # Log trajectory files for each app
+            print("📝 Logging trajectories...")
+            trajectories_logged = 0
+            traces_logged = 0
+            for app in full_report.get('apps', []):
+                app_dir_path = Path(app.get('app_dir', ''))
+                if app_dir_path.exists():
+                    trajectory_file = app_dir_path / "trajectory.jsonl"
+                    if trajectory_file.exists():
+                        app_name = app.get('app_name', 'unknown')
+                        try:
+                            # Log trajectory as artifact
+                            tracker.log_artifact_file(
+                                str(trajectory_file),
+                                artifact_path=f"trajectories/{app_name}"
+                            )
+                            trajectories_logged += 1
+
+                            # Log trajectory as MLflow Trace
+                            tracker.log_trajectory_trace(str(trajectory_file), app_name)
+                            traces_logged += 1
+                        except Exception as e:
+                            print(f"  ⚠️  Failed to log trajectory for {app_name}: {e}")
+
+            if trajectories_logged > 0:
+                print(f"✓ Logged {trajectories_logged} trajectory artifacts")
+            if traces_logged > 0:
+                print(f"✓ Logged {traces_logged} traces to Traces tab")
+
+            # End run
+            tracker.end_run()
+
+            print("✓ MLflow tracking complete")
+            print(f"  Run ID: {run_id}")
+            print(f"  View: ML → Experiments → {tracker.experiment_name}")
+        else:
+            print("⚠️  MLflow tracking disabled (credentials not set)")
+    except Exception as e:
+        print(f"⚠️  MLflow tracking failed: {e}")
+
+    # Print summary to console - All 9 metrics
+    print("\n" + "=" * 60)
+    print("EVALUATION SUMMARY - 9 OBJECTIVE METRICS")
+    print("=" * 60)
+    metrics = summary["metrics_summary"]
+    total = summary['total_apps']
+
+    # Top-level metrics
+    print(f"\n📊 Overall Quality Score: {metrics['avg_appeval_100']:.1f}/100")
+    if metrics.get('avg_eff_units') is not None:
+        print(f"⚡ Average Efficiency:    {metrics['avg_eff_units']:.1f} units (lower is better)")
+
+    print("\nCore Functionality:")
+    print(f"  1. Build Success:         {metrics['build_success']}/{total} ({metrics['build_success']/total*100:.0f}%)")
+    print(f"  2. Runtime Success:       {metrics['runtime_success']}/{total} ({metrics['runtime_success']/total*100:.0f}%)")
+    print(f"  3. Type Safety:           {metrics['type_safety_pass']}/{total} ({metrics['type_safety_pass']/total*100:.0f}%)")
+    print(f"  4. Tests Pass:            {metrics['tests_pass']}/{total} ({metrics['tests_pass']/total*100:.0f}%)")
+    print(f"     Coverage:              {metrics['avg_coverage']:.1f}%")
+
+    print("\nDatabricks Integration:")
+    print(f"  5. DB Connectivity:       {metrics['databricks_connectivity']}/{total} ({metrics['databricks_connectivity']/total*100:.0f}%)")
+    print(f"  6. Data Returned:         {metrics['data_returned']}/{total} ({metrics['data_returned']/total*100:.0f}%)")
+
+    print("\nUI:")
+    print(f"  7. UI Renders:            {metrics['ui_renders']}/{total} ({metrics['ui_renders']/total*100:.0f}%)")
+
+    print("\nDeveloper Experience:")
+    print(f"  8. Local Runability:      {metrics['local_runability_avg']:.1f}/5 ⭐")
+    print(f"  9. Deployability:         {metrics['deployability_avg']:.1f}/5 ⭐")
+
+    print("\nQuality Distribution:")
+    qual = summary["quality_distribution"]
+    print(f"  🟢 Excellent: {len(qual['excellent'])}")
+    print(f"  🟡 Good:      {len(qual['good'])}")
+    print(f"  🟠 Fair:      {len(qual['fair'])}")
+    print(f"  🔴 Poor:      {len(qual['poor'])}")
+
+    print(f"\n📄 Full report: {md_output}")
+
+    # Generate interactive HTML viewer
+    print("\n🌐 Generating interactive HTML viewer...")
+    try:
+        from generate_eval_viewer import generate_html_viewer
+        html_output = output_dir / "evaluation_viewer.html"
+        generate_html_viewer(json_output, html_output)
+        print(f"✓ HTML viewer: {html_output}")
+        print(f"\n🎉 Open in browser: file://{html_output.absolute()}")
+    except Exception as e:
+        print(f"⚠️  Could not generate HTML viewer: {e}")
+
+
 async def main_async():
     """Async main entry point."""
     args = parse_args()
@@ -960,207 +1162,18 @@ async def main_async():
                     if result_dict is not None:
                         results.append(result_dict)
 
+            # Generate reports INSIDE dagger context (before cleanup hangs)
+            eval_duration = time.time() - eval_start_time
+            await _save_results_and_log_mlflow(
+                results, app_dirs, args, eval_duration, script_dir, gen_metrics
+            )
+        return  # Exit early after Dagger path
+
+    # Local evaluation path - save results
     eval_duration = time.time() - eval_start_time
-
-    print("\n" + "=" * 60)
-    print(f"✅ Evaluated {len(results)}/{len(app_dirs)} apps in {eval_duration:.1f}s")
-    if args.parallel > 1:
-        estimated_sequential = eval_duration * args.parallel
-        print(f"   ⚡ Parallelization saved ~{estimated_sequential - eval_duration:.1f}s (speedup: {estimated_sequential/eval_duration:.1f}x)")
-
-    # Generate summary and report (filter out None results)
-    valid_results = [r for r in results if r is not None]
-    print(f"\n📊 Generating summary report for {len(valid_results)} apps...")
-    summary = generate_summary_report(valid_results)
-    markdown = generate_markdown_report(valid_results, summary)
-
-    # Determine output paths - save to app-eval directory
-    output_dir = script_dir.parent / "app-eval"
-    output_dir.mkdir(exist_ok=True)
-
-    # Rename existing evaluation files before creating new ones
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    old_files = [
-        (output_dir / "evaluation_report.json", f"evaluation_report_{timestamp}.json"),
-        (output_dir / "evaluation_report.csv", f"evaluation_report_{timestamp}.csv"),
-        (output_dir / "EVALUATION_REPORT.md", f"EVALUATION_REPORT_{timestamp}.md"),
-    ]
-
-    for old_file, new_name in old_files:
-        if old_file.exists():
-            renamed = old_file.parent / new_name
-            old_file.rename(renamed)
-            print(f"  Preserved: {old_file.name} → {new_name}")
-
-    json_output = output_dir / "evaluation_report.json"
-    md_output = output_dir / "EVALUATION_REPORT.md"
-
-    # Save full results
-    full_report = {
-        "summary": summary,
-        "apps": valid_results,
-        "timestamp": timestamp,
-        "evaluation_run_id": timestamp,
-    }
-    json_output.write_text(json.dumps(full_report, indent=2))
-    print(f"✓ JSON report saved: {json_output}")
-
-    # Save markdown report
-    md_output.write_text(markdown)
-    print(f"✓ Markdown report saved: {md_output}")
-
-    # Save CSV report
-    csv_output = output_dir / "evaluation_report.csv"
-    csv_content = generate_csv_report(valid_results)
-    csv_output.write_text(csv_content)
-    print(f"✓ CSV report saved: {csv_output}")
-
-    # Log to MLflow
-    print("\n📊 Logging to MLflow...")
-    try:
-        from cli.utils.mlflow_tracker import EvaluationTracker
-
-        # Determine experiment name: explicit > staging suffix > default
-        if args.experiment_name:
-            experiment_name = args.experiment_name
-            if args.staging and not experiment_name.endswith("-staging"):
-                experiment_name = experiment_name.rstrip("/") + "-staging"
-        elif args.staging:
-            experiment_name = "/Shared/klaudbiusz-staging-evaluations"
-        else:
-            experiment_name = None  # Use default from mlflow_tracker
-
-        tracker = EvaluationTracker(experiment_name=experiment_name)
-        if tracker.enabled:
-            # Start MLflow run
-            run_name = f"eval-{timestamp}"
-            tags = {
-                "mode": "evaluation",
-                "environment": "staging" if args.staging else "production"
-            }
-
-            # Add git commit hash if available
-            git_hash = get_git_commit_hash()
-            if git_hash:
-                tags["git_commit"] = git_hash
-
-            run_id = tracker.start_run(run_name=run_name, tags=tags)
-
-            # Log parameters
-            params = {
-                "mode": "evaluation",
-                "total_apps": summary['total_apps'],
-                "timestamp": timestamp,
-                "model_version": "claude-sonnet-4-5-20250929",
-            }
-
-            # Add run config parameters if available
-            if run_config.get("mcp_binary"):
-                params["mcp_binary"] = run_config["mcp_binary"]
-            if run_config.get("backend"):
-                params["backend"] = run_config["backend"]
-            if run_config.get("model"):
-                params["llm_model"] = run_config["model"]
-
-            tracker.log_evaluation_parameters(**params)
-
-            # Log metrics from evaluation report
-            tracker.log_evaluation_metrics(full_report)
-
-            # Log artifacts
-            tracker.log_artifact_file(str(json_output))
-            tracker.log_artifact_file(str(md_output))
-            tracker.log_artifact_file(str(csv_output))
-
-            # Log trajectory files for each app
-            print("📝 Logging trajectories...")
-            trajectories_logged = 0
-            traces_logged = 0
-            for app in full_report.get('apps', []):
-                app_dir_path = Path(app.get('app_dir', ''))
-                if app_dir_path.exists():
-                    trajectory_file = app_dir_path / "trajectory.jsonl"
-                    if trajectory_file.exists():
-                        app_name = app.get('app_name', 'unknown')
-                        try:
-                            # Log trajectory as artifact
-                            tracker.log_artifact_file(
-                                str(trajectory_file),
-                                artifact_path=f"trajectories/{app_name}"
-                            )
-                            trajectories_logged += 1
-
-                            # Log trajectory as MLflow Trace
-                            tracker.log_trajectory_trace(str(trajectory_file), app_name)
-                            traces_logged += 1
-                        except Exception as e:
-                            print(f"  ⚠️  Failed to log trajectory for {app_name}: {e}")
-
-            if trajectories_logged > 0:
-                print(f"✓ Logged {trajectories_logged} trajectory artifacts")
-            if traces_logged > 0:
-                print(f"✓ Logged {traces_logged} traces to Traces tab")
-
-            # End run
-            tracker.end_run()
-
-            print("✓ MLflow tracking complete")
-            print(f"  Run ID: {run_id}")
-            print(f"  View: ML → Experiments → {tracker.experiment_name}")
-        else:
-            print("⚠️  MLflow tracking disabled (credentials not set)")
-    except Exception as e:
-        print(f"⚠️  MLflow tracking failed: {e}")
-
-    # Print summary to console - All 9 metrics
-    print("\n" + "=" * 60)
-    print("EVALUATION SUMMARY - 9 OBJECTIVE METRICS")
-    print("=" * 60)
-    metrics = summary["metrics_summary"]
-    total = summary['total_apps']
-
-    # Top-level metrics
-    print(f"\n📊 Overall Quality Score: {metrics['avg_appeval_100']:.1f}/100")
-    if metrics.get('avg_eff_units') is not None:
-        print(f"⚡ Average Efficiency:    {metrics['avg_eff_units']:.1f} units (lower is better)")
-
-    print("\nCore Functionality:")
-    print(f"  1. Build Success:         {metrics['build_success']}/{total} ({metrics['build_success']/total*100:.0f}%)")
-    print(f"  2. Runtime Success:       {metrics['runtime_success']}/{total} ({metrics['runtime_success']/total*100:.0f}%)")
-    print(f"  3. Type Safety:           {metrics['type_safety_pass']}/{total} ({metrics['type_safety_pass']/total*100:.0f}%)")
-    print(f"  4. Tests Pass:            {metrics['tests_pass']}/{total} ({metrics['tests_pass']/total*100:.0f}%)")
-    print(f"     Coverage:              {metrics['avg_coverage']:.1f}%")
-
-    print("\nDatabricks Integration:")
-    print(f"  5. DB Connectivity:       {metrics['databricks_connectivity']}/{total} ({metrics['databricks_connectivity']/total*100:.0f}%)")
-    print(f"  6. Data Returned:         {metrics['data_returned']}/{total} ({metrics['data_returned']/total*100:.0f}%)")
-
-    print("\nUI:")
-    print(f"  7. UI Renders:            {metrics['ui_renders']}/{total} ({metrics['ui_renders']/total*100:.0f}%)")
-
-    print("\nDeveloper Experience:")
-    print(f"  8. Local Runability:      {metrics['local_runability_avg']:.1f}/5 ⭐")
-    print(f"  9. Deployability:         {metrics['deployability_avg']:.1f}/5 ⭐")
-
-    print("\nQuality Distribution:")
-    qual = summary["quality_distribution"]
-    print(f"  🟢 Excellent: {len(qual['excellent'])}")
-    print(f"  🟡 Good:      {len(qual['good'])}")
-    print(f"  🟠 Fair:      {len(qual['fair'])}")
-    print(f"  🔴 Poor:      {len(qual['poor'])}")
-
-    print(f"\n📄 Full report: {md_output}")
-
-    # Generate interactive HTML viewer
-    print("\n🌐 Generating interactive HTML viewer...")
-    try:
-        from generate_eval_viewer import generate_html_viewer
-        html_output = output_dir / "evaluation_viewer.html"
-        generate_html_viewer(json_output, html_output)
-        print(f"✓ HTML viewer: {html_output}")
-        print(f"\n🎉 Open in browser: file://{html_output.absolute()}")
-    except Exception as e:
-        print(f"⚠️  Could not generate HTML viewer: {e}")
+    await _save_results_and_log_mlflow(
+        results, app_dirs, args, eval_duration, script_dir, gen_metrics
+    )
 
 
 def main():
