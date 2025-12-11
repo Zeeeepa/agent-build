@@ -46,12 +46,13 @@ class DockerWorkspace:
         container_name = f"eval-{app_dir.name}-{port}-{uuid.uuid4().hex[:8]}"
 
         # Build docker run command
+        # --privileged needed for Databricks (proc mount, AppArmor bypasses)
         cmd = [
             "docker", "run", "-d",
             "--name", container_name,
             "-v", f"{app_dir.resolve()}:/app",
             "-w", "/app",
-            "--security-opt", "apparmor=unconfined",  # Disable AppArmor for Databricks
+            "--privileged",
         ]
 
         # Add environment variables
