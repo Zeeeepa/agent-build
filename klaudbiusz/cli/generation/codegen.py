@@ -8,6 +8,7 @@ from typing import NotRequired, TypedDict
 from uuid import UUID, uuid4
 
 from claude_agent_sdk import (
+    AgentDefinition,
     AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
@@ -85,7 +86,15 @@ class ClaudeAppBuilder:
         setup_logging(self.suppress_logs, self.mcp_binary)
         await self.tracker.init(wipe_db=self.wipe_db)
 
-        agents = {}
+        # Configure Bash subagent to NOT have Bash access - prevents circumventing disallowed_tools
+        # by spawning a Bash subagent via Task tool
+        agents = {
+            "Bash": AgentDefinition(
+                description="File operations agent without shell access",
+                prompt="You cannot execute shell commands. Use file tools instead.",
+                tools=["Read", "Write", "Edit", "Glob", "Grep"],
+            ),
+        }
 
         # workflow and template best practices are now in the MCP tool description
         base_instructions = """Use MCP tools to scaffold, build, and test the app as needed.
