@@ -2,6 +2,7 @@
 
 import json
 import sys
+from pathlib import Path
 
 import fire
 
@@ -36,6 +37,9 @@ def run(
         case list():
             parsed_mcp_args = mcp_args
 
+    metrics = None
+    error: Exception | None = None
+
     match backend:
         case "claude":
             from cli.generation.codegen import ClaudeAppBuilder
@@ -48,7 +52,10 @@ def run(
                 mcp_args=parsed_mcp_args,
                 output_dir=output_dir,
             )
-            metrics = builder.run(prompt, wipe_db=False)
+            try:
+                metrics = builder.run(prompt, wipe_db=False)
+            except Exception as e:
+                error = e
         case "litellm":
             from cli.generation.codegen_multi import LiteLLMAppBuilder
 
@@ -64,9 +71,25 @@ def run(
                 suppress_logs=False,
                 output_dir=output_dir,
             )
-            metrics = builder.run(prompt)
+            try:
+                metrics = builder.run(prompt)
+            except Exception as e:
+                error = e
         case _:
             print(f"Error: Unknown backend: {backend}", file=sys.stderr)
+            sys.exit(1)
+
+    # check if app was created even if SDK had an error
+    app_dir = Path(output_dir) / app_name
+    app_exists = app_dir.exists() and any(app_dir.iterdir())
+
+    if error:
+        print(f"SDK error: {error}", file=sys.stderr)
+        if app_exists:
+            # app was created before SDK error (e.g., shutdown bug) - treat as success
+            print(f"App directory exists at {app_dir}, treating as success despite SDK error")
+        else:
+            # real failure - no app created
             sys.exit(1)
 
     print(f"Metrics: {metrics}")

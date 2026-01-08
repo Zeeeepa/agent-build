@@ -147,6 +147,7 @@ class DaggerAppGenerator:
         log_file_local.parent.mkdir(parents=True, exist_ok=True)
 
         # capture stdout/stderr - even on failure we want to save what we can
+        exec_error: dagger.ExecError | None = None
         try:
             log_content = await result.stdout()
             stderr_content = await result.stderr()
@@ -156,15 +157,22 @@ class DaggerAppGenerator:
             # container command failed - save error output as log
             full_log = f"=== EXEC ERROR ===\n{e}\n\n=== STDOUT ===\n{e.stdout}\n\n=== STDERR ===\n{e.stderr}"
             log_file_local.write_text(full_log)
-            raise
+            exec_error = e  # save error but still try to export app
 
-        # export app directory (if it exists)
+        # export app directory (if it exists) - try even after ExecError
+        # because the app may have been built successfully before SDK shutdown error
         app_dir_local = self.output_dir / app_name
         try:
             await result.directory(app_output).export(str(app_dir_local))
+            # app was exported successfully - if we had an ExecError, log it but don't fail
+            if exec_error:
+                logger.warning(f"Container exited with error but app was exported: {exec_error}")
         except dagger.QueryError as e:
             if "no such file or directory" in str(e):
-                # agent didn't create an app directory (e.g. just answered a question)
+                # agent didn't create an app directory
+                if exec_error:
+                    # no app AND exec error - this is a real failure
+                    raise exec_error
                 return None, log_file_local, None
             raise
 
