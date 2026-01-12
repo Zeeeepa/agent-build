@@ -267,6 +267,24 @@ class DaggerAppGenerator:
             if val := os.environ.get(var):
                 container = container.with_env_variable(var, val)
 
+        # mount appkit template if available locally (for testing local template changes)
+        # CLI uses DATABRICKS_APPKIT_TEMPLATE_PATH env var to override default GitHub download
+        mcp_binary_dir = self.mcp_binary.parent
+        appkit_template = mcp_binary_dir / "experimental" / "aitools" / "templates" / "appkit"
+        if appkit_template.exists():
+            container = container.with_directory(
+                "/opt/appkit-template",
+                client.host().directory(str(appkit_template)),
+            )
+            container = container.with_env_variable(
+                "DATABRICKS_APPKIT_TEMPLATE_PATH", "/opt/appkit-template"
+            )
+        else:
+            logger.warning(
+                f"Local appkit template not found at {appkit_template}. "
+                "Scaffolding will use GitHub download (may fail if template not published yet)."
+            )
+
         # mount databricks config for CLI authentication (OAuth profile)
         # container runs as 'klaudbiusz' user (see Dockerfile)
         databrickscfg = Path.home() / ".databrickscfg"
