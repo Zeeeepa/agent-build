@@ -3,6 +3,11 @@
 
 Uses Dagger to run evaluations in isolated containers, eliminating port
 conflicts and machine environment pollution.
+
+Note: This file uses ts_workspace.py functions that execute shell scripts
+inside Dagger containers. The agent-based approach from eval_agent.py is
+not used here because running the Claude SDK agent inside a Dagger container
+would require significant architecture changes.
 """
 
 import asyncio
