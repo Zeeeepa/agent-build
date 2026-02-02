@@ -43,6 +43,8 @@ jobs:
     name: Rust Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Only run when API keys are available (skipped for forks/external PRs)
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -75,6 +77,8 @@ jobs:
     name: Rust Tests (Dagger)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Only run when API keys are available (skipped for forks/external PRs)
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -144,7 +148,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     needs: [rust-checks, rust-tests, rust-tests-dagger, check-release-condition]
-    if: needs.check-release-condition.outputs.should_build == 'true'
+    # Build if: release condition met, checks passed, and tests passed or were skipped (no API keys)
+    if: |
+      always() &&
+      needs.check-release-condition.outputs.should_build == 'true' &&
+      needs.rust-checks.result == 'success' &&
+      (needs.rust-tests.result == 'success' || needs.rust-tests.result == 'skipped') &&
+      (needs.rust-tests-dagger.result == 'success' || needs.rust-tests-dagger.result == 'skipped')
     strategy:
       matrix:
         include:
