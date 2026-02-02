@@ -74,12 +74,16 @@ else
         fi
     done
 fi
+# Rebuild native modules for current platform (fixes esbuild on Databricks)
+npm rebuild esbuild 2>/dev/null || true
 """,
     "build": """
 cd {app_dir}
 # Generate TypeScript types from schema before building (AppKit apps)
 if [ -f "scripts/generate-types.ts" ]; then
-    npm run typegen 2>/dev/null || true
+    # Rebuild esbuild for current platform (fixes architecture mismatch on Databricks)
+    npm rebuild esbuild 2>/dev/null || true
+    npm run typegen 2>&1 || echo "Warning: typegen failed, continuing with build..."
 fi
 # Run build
 if [ -f "client/package.json" ]; then
@@ -92,7 +96,9 @@ fi
 cd {app_dir}
 # Generate TypeScript types from schema before checking (AppKit apps)
 if [ -f "scripts/generate-types.ts" ]; then
-    npm run typegen 2>/dev/null || true
+    # Rebuild esbuild for current platform (fixes architecture mismatch on Databricks)
+    npm rebuild esbuild 2>/dev/null || true
+    npm run typegen 2>&1 || echo "Warning: typegen failed, continuing with typecheck..."
 fi
 # Run type checking
 for dir in . server client; do
