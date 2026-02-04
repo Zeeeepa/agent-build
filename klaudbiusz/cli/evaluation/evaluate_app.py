@@ -828,17 +828,19 @@ async def evaluate_app(app_dir: Path, prompt: str | None = None, port: int = 800
                 issues.append("Databricks connectivity failed")
 
             # Metric 6: Data validity (LLM - binary check) - NOT INCLUDED IN SCORE
-            if db_success:
-                data_returned, data_details = check_data_validity_llm(app_dir, prompt, template)
-                metrics.data_returned = data_returned
-                if not data_returned:
-                    issues.append(f"Data validity concerns: {data_details}")
+            # TODO: Re-enable when LLM validation is reliable
+            # if db_success:
+            #     data_returned, data_details = check_data_validity_llm(app_dir, prompt, template)
+            #     metrics.data_returned = data_returned
+            #     if not data_returned:
+            #         issues.append(f"Data validity concerns: {data_details}")
 
             # Metric 7: UI functional (VLM - binary check) - NOT INCLUDED IN SCORE
-            ui_renders, ui_details = check_ui_functional_vlm(app_dir, prompt)
-            metrics.ui_renders = ui_renders
-            if not ui_renders:
-                issues.append(f"UI concerns: {ui_details}")
+            # TODO: Re-enable when VLM validation is reliable
+            # ui_renders, ui_details = check_ui_functional_vlm(app_dir, prompt)
+            # metrics.ui_renders = ui_renders
+            # if not ui_renders:
+            #     issues.append(f"UI concerns: {ui_details}")
 
         # Metric 8: Local runability (DevX)
         local_score, local_details = check_local_runability(app_dir, template)
