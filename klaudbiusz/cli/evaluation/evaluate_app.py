@@ -217,12 +217,30 @@ def _prepare_runtime_env(app_dir: Path, container_name: str = "", port: int = 80
     # Databricks credentials - check for SDK auto-auth or env vars
     if not _is_databricks_auth_available():
         print("  ⚠️  Warning: Databricks auth not available (no env vars and not on Databricks cluster)")
-    elif not env.get("DATABRICKS_HOST"):
-        # On Databricks cluster, SDK handles auth but we may need to set DATABRICKS_HOST for apps
-        host = _get_databricks_host_from_sdk()
-        if host:
-            env["DATABRICKS_HOST"] = host
-            print(f"  ℹ️  Using Databricks SDK auto-auth (host: {host})")
+    else:
+        # Extract host and token from SDK for child processes (shell scripts)
+        try:
+            from databricks.sdk import WorkspaceClient
+            client = WorkspaceClient()
+
+            if not env.get("DATABRICKS_HOST") and client.config.host:
+                env["DATABRICKS_HOST"] = client.config.host
+
+            if not env.get("DATABRICKS_TOKEN"):
+                # Try PAT first, then OAuth token extraction
+                if client.config.token:
+                    env["DATABRICKS_TOKEN"] = client.config.token
+                else:
+                    # Extract token from OAuth auth headers
+                    headers = client.config.authenticate()
+                    auth_header = headers.get("Authorization", "")
+                    if auth_header.startswith("Bearer "):
+                        env["DATABRICKS_TOKEN"] = auth_header[7:]
+
+            if env.get("DATABRICKS_HOST"):
+                print(f"  ℹ️  Using Databricks SDK auto-auth (host: {env['DATABRICKS_HOST']})")
+        except Exception:
+            pass  # SDK auth not available
 
     # OAuth credentials with mock fallback for eval
     env.setdefault("DATABRICKS_CLIENT_ID", "eval-mock-client-id")

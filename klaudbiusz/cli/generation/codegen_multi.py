@@ -78,12 +78,77 @@ class MCPSession:
 
 
 class LiteLLMAgent:
+    # Local tools (not from MCP)
+    LOCAL_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read file contents. Returns content with line numbers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Absolute path to file"},
+                    },
+                    "required": ["file_path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write content to a file. Creates parent directories if needed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Absolute path to file"},
+                        "content": {"type": "string", "description": "Content to write"},
+                    },
+                    "required": ["file_path", "content"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "edit_file",
+                "description": "Edit file by replacing old_string with new_string.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Absolute path to file"},
+                        "old_string": {"type": "string", "description": "Exact string to replace"},
+                        "new_string": {"type": "string", "description": "Replacement string"},
+                    },
+                    "required": ["file_path", "old_string", "new_string"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "bash",
+                "description": "Execute a bash command. Use for npm, git, mkdir, etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "Bash command to execute"},
+                        "working_directory": {"type": "string", "description": "Directory to run command in"},
+                    },
+                    "required": ["command"],
+                },
+            },
+        },
+    ]
+
     def __init__(
         self,
         model: str,
         mcp_session: ClientSession,
         system_prompt: str,
         app_name: str,
+        app_dir: Path | None = None,
         max_turns: int = 75,
         temperature: float = 0.7,
         suppress_logs: bool = False,
@@ -91,6 +156,7 @@ class LiteLLMAgent:
         self.model = model
         self.mcp_session = mcp_session
         self.system_prompt = system_prompt
+        self.app_dir = app_dir  # Base directory for file operations
         self.max_turns = max_turns
         self.temperature = temperature
         self.suppress_logs = suppress_logs
@@ -102,9 +168,11 @@ class LiteLLMAgent:
     async def initialize(self):
         tools_list = await self.mcp_session.list_tools()
         self.tools = [self._convert_mcp_tool(t) for t in tools_list.tools]
+        # Add local file tools
+        self.tools.extend(self.LOCAL_TOOLS)
 
         if not self.suppress_logs:
-            logger.info(f"Loaded {len(self.tools)} MCP tools")
+            logger.info(f"Loaded {len(self.tools)} tools ({len(self.LOCAL_TOOLS)} local)")
 
     def _clean_schema_for_databricks(self, schema: dict[str, Any]) -> dict[str, Any]:
         """Remove JSON schema fields that Databricks serving doesn't support."""
@@ -251,8 +319,67 @@ class LiteLLMAgent:
             app_dir=self.scaffold_tracker.app_dir,
         )
 
+    async def _execute_local_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Execute a local tool."""
+        import subprocess
+
+        if tool_name == "read_file":
+            file_path = Path(arguments["file_path"])
+            if not file_path.exists():
+                return f"Error: File not found: {file_path}"
+            content = file_path.read_text()
+            lines = content.split("\n")
+            numbered = [f"{i+1:6}\t{line}" for i, line in enumerate(lines[:2000])]
+            return "\n".join(numbered)
+
+        elif tool_name == "write_file":
+            file_path = Path(arguments["file_path"])
+            content = arguments["content"]
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content)
+            return f"Successfully wrote {len(content)} bytes to {file_path}"
+
+        elif tool_name == "edit_file":
+            file_path = Path(arguments["file_path"])
+            if not file_path.exists():
+                return f"Error: File not found: {file_path}"
+            old_string = arguments["old_string"]
+            new_string = arguments["new_string"]
+            content = file_path.read_text()
+            if old_string not in content:
+                return f"Error: old_string not found in {file_path}"
+            new_content = content.replace(old_string, new_string, 1)
+            file_path.write_text(new_content)
+            return f"Successfully edited {file_path}"
+
+        elif tool_name == "bash":
+            command = arguments["command"]
+            cwd = arguments.get("working_directory", str(self.app_dir.parent) if self.app_dir else ".")
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                output = result.stdout + result.stderr
+                if len(output) > 30000:
+                    output = output[:30000] + "\n[Output truncated]"
+                if result.returncode != 0:
+                    return f"Command failed (exit {result.returncode}):\n{output}"
+                return output if output else f"Command succeeded (exit 0)"
+            except subprocess.TimeoutExpired:
+                return "Error: Command timed out after 120 seconds"
+            except Exception as e:
+                return f"Error executing command: {e}"
+
+        return f"Error: Unknown local tool: {tool_name}"
+
     async def _execute_tools(self, tool_calls) -> list[dict[str, Any]]:
         results = []
+        local_tool_names = {"read_file", "write_file", "edit_file", "bash"}
 
         for tc in tool_calls:
             tool_name = tc.function.name
@@ -262,16 +389,20 @@ class LiteLLMAgent:
                 arguments = tc.function.arguments
 
             if not self.suppress_logs:
-                logger.info(f"   → {tool_name}({', '.join(f'{k}={v}' for k, v in arguments.items())})")
+                logger.info(f"   → {tool_name}({', '.join(f'{k}={v!r:.50}' for k, v in arguments.items())})")
 
             if tool_name == "scaffold_data_app" and "work_dir" in arguments:
                 self.scaffold_tracker.track(tc.id, arguments["work_dir"])
 
             try:
-                result = await self.mcp_session.call_tool(tool_name, arguments)
-                self.scaffold_tracker.resolve(tc.id)
+                # Handle local file tools directly
+                if tool_name in local_tool_names:
+                    content = await self._execute_local_tool(tool_name, arguments)
+                else:
+                    result = await self.mcp_session.call_tool(tool_name, arguments)
+                    content = str(result.content[0].text if result.content else "")  # type: ignore[attr-defined]
 
-                content = str(result.content[0].text if result.content else "")  # type: ignore[attr-defined]
+                self.scaffold_tracker.resolve(tc.id)
                 self.tracker.log_tool_result(tc.id, content, is_error=False)
                 results.append({"role": "tool", "tool_call_id": tc.id, "content": content})
 
@@ -294,7 +425,9 @@ class LiteLLMAppBuilder:
         suppress_logs: bool = False,
         output_dir: str | None = None,
     ):
-        self.app_name = app_name
+        # Convert hyphens to underscores for Databricks CLI compatibility
+        # The init-template command requires names with underscores only
+        self.app_name = app_name.replace("-", "_")
         self.model = model
         self.mcp_binary = mcp_binary
         self.mcp_json_path = mcp_json_path
@@ -310,40 +443,58 @@ class LiteLLMAppBuilder:
         if is_databricks_cli_mcp:
             return """You are an AI assistant that builds Databricks data applications.
 
+## CRITICAL: YOU MUST ACTUALLY CREATE FILES
+- Do NOT just describe what you would do
+- Do NOT explain code without writing it
+- ACTUALLY CALL the tools to create files
+- Every response should include tool calls that create real files
+
 ## Available Tools
-- **databricks_discover**: Call first to see commands and get warehouse ID
-- **invoke_databricks_cli**: Execute CLI commands
-- **read_skill_file**: Read skills for domain guidance
 
-## CRITICAL: You MUST create actual app files!
-Do NOT just describe what you would do. Actually scaffold and create the application.
+### Databricks CLI (via MCP)
+- **invoke_databricks_cli**: Execute CLI commands (use for init-template)
 
-## Workflow
-1. Call databricks_discover first - it provides the default warehouse ID
-2. Get warehouse ID using: invoke_databricks_cli(args=["experimental", "aitools", "tools", "get-default-warehouse"], working_directory=".")
-3. Scaffold the app:
-   invoke_databricks_cli(
-     args=["experimental", "aitools", "tools", "init-template", "app", "--name", "APP_NAME", "--warehouse", "WAREHOUSE_ID"],
-     working_directory="/path/to/output"
-   )
-4. The scaffolded app will have: package.json, schema.ts, client/, server/, config/queries/
-5. Modify SQL queries in config/queries/ and schema.ts for the use case
-6. Run `npm run typegen` after schema changes
+### Local Tools (ALWAYS USE THESE for file operations)
+- **write_file(file_path, content)**: Write content to file - USE THIS to create files!
+- **edit_file(file_path, old_string, new_string)**: Edit existing files
+- **read_file(file_path)**: Read file contents
+- **bash(command, working_directory)**: Run shell commands (mkdir, npm, etc.)
+
+## NAMING RULES
+- App names MUST use underscores: "sales_dashboard" NOT "sales-dashboard"
+
+## Workflow - FOLLOW THESE STEPS EXACTLY
+1. Use bash to create app directory: bash(command="mkdir -p APP_DIR", working_directory="/tmp")
+2. Scaffold with init-template:
+   invoke_databricks_cli(args=["experimental", "aitools", "tools", "init-template", "app", "--name", "APP_NAME", "--warehouse", "e4169814a02ee123"], working_directory="PARENT_DIR")
+3. Use write_file to customize SQL queries in config/queries/
+4. Use write_file to update schema.ts
+5. Use write_file to customize client components
 
 ## Example
-```python
-# Get warehouse ID
-result = invoke_databricks_cli(args=["experimental", "aitools", "tools", "get-default-warehouse"], working_directory=".")
-warehouse_id = result.strip()
-
-# Scaffold app
+If App directory is /tmp/apps/my_app:
+```
+# 1. Scaffold into PARENT directory /tmp/apps with name my_app
 invoke_databricks_cli(
-  args=["experimental", "aitools", "tools", "init-template", "app", "--name", "sales-dashboard", "--warehouse", warehouse_id],
+  args=["experimental", "aitools", "tools", "init-template", "app", "--name", "my_app", "--warehouse", "e4169814a02ee123"],
   working_directory="/tmp/apps"
+)
+
+# 2. Read and modify SQL query
+read_file(file_path="/tmp/apps/my_app/config/queries/main.sql")
+
+# 3. Write custom SQL
+write_file(
+  file_path="/tmp/apps/my_app/config/queries/main.sql",
+  content="SELECT * FROM catalog.schema.table LIMIT 100"
 )
 ```
 
-IMPORTANT: You MUST scaffold first, then modify files. Never skip scaffolding!"""
+## Tool Usage Rules
+- Use invoke_databricks_cli ONLY for init-template scaffolding and databricks queries
+- Use bash for shell commands (mkdir, npm, etc.)
+- Use read_file/write_file/edit_file for file operations
+- Do NOT use invoke_databricks_cli for shell commands (no bash -c, no cat, no echo)"""
         else:
             return """You are an AI assistant that builds Databricks data applications.
 
@@ -393,17 +544,21 @@ Be concise and to the point."""
 
             system_prompt = self._build_system_prompt()
 
+            # Ensure output directory exists (parent of app_dir)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+
+            # compute absolute path for MCP tool (scaffold_data_app requires absolute path)
+            app_dir = self.output_dir / self.app_name
+
             agent = LiteLLMAgent(
                 model=self.model,
                 mcp_session=session,
                 system_prompt=system_prompt,
                 app_name=self.app_name,
+                app_dir=app_dir,
                 suppress_logs=self.suppress_logs,
             )
             await agent.initialize()
-
-            # compute absolute path for MCP tool (scaffold_data_app requires absolute path)
-            app_dir = self.output_dir / self.app_name
             user_prompt = f"App name: {self.app_name}\nApp directory: {app_dir}\n\nTask: {prompt}"
             metrics = await agent.run(user_prompt)
 

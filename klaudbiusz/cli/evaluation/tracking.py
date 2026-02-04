@@ -69,22 +69,30 @@ def setup_mlflow(
             _mlflow_configured = False
             return False
 
-    # Fall back to env var authentication
-    if not host or not token:
-        print("MLflow tracking disabled: DATABRICKS_HOST or DATABRICKS_TOKEN not set (and not on Databricks cluster)")
-        _mlflow_configured = False
-        return False
+    # Try PAT auth if credentials provided
+    if host and token:
+        try:
+            if not host.startswith("https://"):
+                host = f"https://{host}"
+            os.environ["DATABRICKS_HOST"] = host
 
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment(experiment_name)
+            _experiment_name = experiment_name
+            _mlflow_configured = True
+            print(f"MLflow tracking enabled (PAT auth): {experiment_name}")
+            return True
+        except Exception as e:
+            print(f"MLflow PAT auth failed: {e}, trying OAuth...")
+            # Fall through to try OAuth
+
+    # Try OAuth/databricks-cli auth via unified SDK auth
     try:
-        if not host.startswith("https://"):
-            host = f"https://{host}"
-        os.environ["DATABRICKS_HOST"] = host
-
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(experiment_name)
         _experiment_name = experiment_name
         _mlflow_configured = True
-        print(f"MLflow tracking enabled: {experiment_name}")
+        print(f"MLflow tracking enabled (OAuth): {experiment_name}")
         return True
     except Exception as e:
         print(f"MLflow setup failed: {e}")

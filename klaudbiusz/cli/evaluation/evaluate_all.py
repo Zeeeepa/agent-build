@@ -1054,7 +1054,7 @@ async def main_async():
             print(f"\n[{i}/{len(app_dirs)}] {app_dir.name}")
             port = 8000 + i
             try:
-                result = evaluate_app(app_dir, prompts.get(app_dir.name), port)
+                result = await evaluate_app(app_dir, prompts.get(app_dir.name), port)
                 result_dict = asdict(result)
 
                 # Add generation metrics from bulk_run results or generation_metrics.json
