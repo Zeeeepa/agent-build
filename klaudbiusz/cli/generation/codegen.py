@@ -26,16 +26,7 @@ from cli.utils.shared import ScaffoldTracker, Tracker, setup_logging
 
 def _is_running_as_root() -> bool:
     """Check if running as root user."""
-    return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
-
-
-async def _auto_approve_tool(
-    tool_name: str,
-    tool_input: dict[str, Any],
-    context: ToolPermissionContext,
-) -> PermissionResultAllow:
-    """Auto-approve all tool uses (used when running as root with streaming mode)."""
-    return PermissionResultAllow()
+    return os.geteuid() == 0 if hasattr(os, "geteuid") else False
 
 try:
     import asyncpg  # type: ignore[import-untyped]
@@ -101,10 +92,15 @@ Never deploy the app, just scaffold and build it.
 
         disallowed_tools = ["NotebookEdit", "WebSearch", "WebFetch"]
 
-        # When running as root (e.g., Databricks clusters), use streaming mode with
-        # can_use_tool callback instead of bypassPermissions, because the CLI's
-        # --dangerously-skip-permissions flag doesn't work with root privileges.
-        use_streaming_mode = _is_running_as_root()
+        # When running as root (e.g., Databricks clusters), the CLI's
+        # --dangerously-skip-permissions flag doesn't work by default.
+        # Solution: Set IS_SANDBOX=1 env var to allow bypassing the root check.
+        # See: https://github.com/anthropics/claude-code/issues/3490
+        is_root = _is_running_as_root()
+        env_vars: dict[str, str] = {}
+        if is_root:
+            logger.info("Running as root, setting IS_SANDBOX=1 to allow permission bypass")
+            env_vars["IS_SANDBOX"] = "1"
 
         options = ClaudeAgentOptions(
             system_prompt={
@@ -112,10 +108,8 @@ Never deploy the app, just scaffold and build it.
                 "preset": "claude_code",
                 "append": base_instructions,
             },
-            # Use bypassPermissions only when not running as root
-            permission_mode=None if use_streaming_mode else "bypassPermissions",
-            # Use can_use_tool callback to auto-approve when running as root
-            can_use_tool=_auto_approve_tool if use_streaming_mode else None,
+            permission_mode="bypassPermissions",
+            env=env_vars,
             disallowed_tools=disallowed_tools,
             setting_sources=["user", "project"],
             max_turns=75,
