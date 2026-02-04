@@ -1,6 +1,7 @@
 """Runner script executed inside Dagger container."""
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -73,6 +74,13 @@ def run(
                 metrics = builder.run(prompt)
             except Exception as e:
                 error = e
+        case "opencode":
+            metrics = _run_opencode(
+                prompt=prompt,
+                app_name=app_name,
+                model=model,
+                output_dir=output_dir,
+            )
         case _:
             print(f"Error: Unknown backend: {backend}", file=sys.stderr)
             sys.exit(1)
@@ -91,6 +99,44 @@ def run(
             sys.exit(1)
 
     print(f"Metrics: {metrics}")
+
+
+def _run_opencode(
+    prompt: str,
+    app_name: str,
+    model: str | None,
+    output_dir: str,
+) -> dict:
+    """Run opencode generation via bun subprocess."""
+    # build command
+    cmd = [
+        "bun",
+        "run",
+        "cli/generation_opencode/src/index.ts",
+        "--app-name",
+        app_name,
+        "--prompt",
+        prompt,
+        "--output-dir",
+        output_dir,
+    ]
+
+    if model:
+        cmd.extend(["--model", model])
+
+    # run opencode generation
+    result = subprocess.run(cmd, cwd="/workspace", capture_output=False)
+
+    if result.returncode != 0:
+        print(f"Error: opencode generation failed with code {result.returncode}", file=sys.stderr)
+        sys.exit(result.returncode)
+
+    # read metrics from generated file
+    metrics_file = Path(output_dir) / app_name / "generation_metrics.json"
+    if metrics_file.exists():
+        return json.loads(metrics_file.read_text())
+
+    return {"cost_usd": 0, "input_tokens": 0, "output_tokens": 0, "turns": 0}
 
 
 if __name__ == "__main__":
