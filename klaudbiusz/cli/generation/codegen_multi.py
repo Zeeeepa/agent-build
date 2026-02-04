@@ -48,11 +48,25 @@ class MCPSession:
         self.session: ClientSession | None = None
 
     async def __aenter__(self) -> ClientSession:
-        env = {
-            "DATABRICKS_HOST": os.getenv("DATABRICKS_HOST", ""),
-            "DATABRICKS_TOKEN": os.getenv("DATABRICKS_TOKEN", ""),
-            "DATABRICKS_WAREHOUSE_ID": os.getenv("DATABRICKS_WAREHOUSE_ID", ""),
-        }
+        # Build env for MCP subprocess - only pass vars that are explicitly set
+        # The Databricks CLI supports SDK auto-auth on clusters, so don't override
+        # with empty strings which could break auto-auth
+        env = {}
+
+        # Always pass host if set (CLI needs to know which workspace)
+        databricks_host = os.getenv("DATABRICKS_HOST", "")
+        if databricks_host:
+            env["DATABRICKS_HOST"] = databricks_host
+
+        # Only pass token if explicitly set - let CLI use auto-auth otherwise
+        databricks_token = os.getenv("DATABRICKS_TOKEN", "")
+        if databricks_token:
+            env["DATABRICKS_TOKEN"] = databricks_token
+
+        # Pass warehouse ID if set
+        warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID", "")
+        if warehouse_id:
+            env["DATABRICKS_WAREHOUSE_ID"] = warehouse_id
 
         command, args = build_mcp_command(self.mcp_binary, self.mcp_manifest, self.mcp_json_path, self.mcp_args)
         # add workspace tools flag for LiteLLM backend (works for both binary and cargo run)

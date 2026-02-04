@@ -26,7 +26,8 @@ def create_ts_workspace_docker(
     Returns:
         DockerWorkspace configured with Node.js, app files, and eval scripts
     """
-    # Prepare environment variables
+    # Prepare environment variables - pass through from parent env
+    # Docker containers need explicit credentials since they don't have cluster identity
     env_vars = {
         "DATABRICKS_HOST": os.getenv("DATABRICKS_HOST", ""),
         "DATABRICKS_TOKEN": os.getenv("DATABRICKS_TOKEN", ""),
