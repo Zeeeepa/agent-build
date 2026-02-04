@@ -141,7 +141,7 @@ Never deploy the app, just scaffold and build it.
 
         # Create streaming prompt generator for streaming mode (required for can_use_tool)
         async def streaming_prompt():
-            yield {"type": "user", "content": user_prompt}
+            yield {"type": "user", "message": {"role": "user", "content": user_prompt}}
 
         # Use streaming mode when running as root (for can_use_tool callback)
         prompt_input = streaming_prompt() if use_streaming_mode else user_prompt
