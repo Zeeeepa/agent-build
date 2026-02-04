@@ -66,6 +66,8 @@ class ClaudeAppBuilder:
         wipe_db: bool = True,
         suppress_logs: bool = False,
         output_dir: str | None = None,
+        mcp_binary: str | None = None,
+        mcp_args: list[str] | None = None,
     ):
         load_dotenv()
         self.wipe_db = wipe_db
@@ -73,6 +75,8 @@ class ClaudeAppBuilder:
         self.app_name = app_name
         self.suppress_logs = suppress_logs
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "app"
+        self.mcp_binary = mcp_binary
+        self.mcp_args = mcp_args or ["experimental", "apps-mcp", "mcp"]
         self.tracker = Tracker(self.run_id, app_name, suppress_logs)
         self.scaffold_tracker = ScaffoldTracker()
 
@@ -82,7 +86,16 @@ class ClaudeAppBuilder:
         setup_logging(self.suppress_logs)
         await self.tracker.init(wipe_db=self.wipe_db)
 
-        base_instructions = """Use /databricks-apps skill to scaffold, build, and test the app.
+        # Use MCP tools directly if mcp_binary is provided, otherwise fall back to skills
+        if self.mcp_binary:
+            base_instructions = """Use the mcp__edda__scaffold_data_app tool to scaffold the app.
+Use the mcp__edda__databricks_* tools to explore data in Databricks when relevant.
+Be concise and to the point in your responses.
+Use up to 10 tools per call to speed up the process.
+Never deploy the app, just scaffold and build it.
+"""
+        else:
+            base_instructions = """Use /databricks-apps skill to scaffold, build, and test the app.
 Use /databricks skill to explore data in Databricks when relevant.
 Be concise and to the point in your responses.
 Use up to 10 tools per call to speed up the process.
@@ -101,6 +114,16 @@ Never deploy the app, just scaffold and build it.
             logger.info("Running as root, setting IS_SANDBOX=1 to allow permission bypass")
             env_vars["IS_SANDBOX"] = "1"
 
+        # Configure MCP server if binary is provided
+        mcp_servers: dict[str, dict[str, object]] = {}
+        if self.mcp_binary:
+            logger.info(f"Configuring MCP server: {self.mcp_binary} {self.mcp_args}")
+            mcp_servers["edda"] = {
+                "type": "stdio",
+                "command": self.mcp_binary,
+                "args": self.mcp_args,
+            }
+
         options = ClaudeAgentOptions(
             system_prompt={
                 "type": "preset",
@@ -109,6 +132,7 @@ Never deploy the app, just scaffold and build it.
             },
             permission_mode="bypassPermissions",
             env=env_vars,
+            mcp_servers=mcp_servers if mcp_servers else {},
             disallowed_tools=disallowed_tools,
             setting_sources=["user", "project"],
             max_turns=75,

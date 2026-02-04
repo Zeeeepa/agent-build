@@ -28,15 +28,18 @@ def run(
         app_name: Optional app name (default: timestamp-based)
         backend: Backend to use ("claude" or "litellm", default: "claude")
         model: LLM model (required if backend=litellm)
-        mcp_binary: Path to edda_mcp binary (required for litellm backend)
-        mcp_args: Optional list of args passed to the MCP server (litellm only)
+        mcp_binary: Path to edda_mcp binary (optional for claude, required for litellm)
+        mcp_args: Optional list of args passed to the MCP server
         output_dir: Directory to store generated apps (default: ./app)
 
     Usage:
-        # Claude backend (default) - uses skills, no MCP needed
+        # Claude backend with skills (no MCP)
         uv run python -m cli.generation.local_run "build dashboard"
 
-        # LiteLLM backend - still requires MCP
+        # Claude backend with MCP (faster, direct tool access)
+        uv run python -m cli.generation.local_run "build dashboard" --mcp_binary=/path/to/edda_mcp
+
+        # LiteLLM backend - requires MCP
         uv run python -m cli.generation.local_run "build dashboard" --backend=litellm --model=gemini/gemini-2.5-pro --mcp_binary=/path/to/edda_mcp
     """
     if backend == "litellm":
@@ -55,6 +58,8 @@ def run(
             builder = ClaudeAppBuilder(
                 app_name=app_name,
                 output_dir=str(resolved_output_dir),
+                mcp_binary=mcp_binary,
+                mcp_args=mcp_args,
             )
             metrics = builder.run(prompt)
             app_dir = metrics.get("app_dir")
