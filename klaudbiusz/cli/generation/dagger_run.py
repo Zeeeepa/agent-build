@@ -216,14 +216,32 @@ class DaggerAppGenerator:
         # build from Dockerfile (leverages BuildKit cache)
         container = context.docker_build()
 
-        # pass through env vars from host
+        # pass through env vars from host (LLM providers + internal)
         env_vars = [
             "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
             "NEON_DATABASE_URL",
         ]
         for var in env_vars:
             if val := os.environ.get(var):
                 container = container.with_env_variable(var, val)
+
+        # map GEMINI_API_KEY to GOOGLE_GENERATIVE_AI_API_KEY (AI SDK uses this name)
+        if gemini_key := os.environ.get("GEMINI_API_KEY"):
+            container = container.with_env_variable("GOOGLE_GENERATIVE_AI_API_KEY", gemini_key)
+
+        # create opencode auth.json from env var for OpenRouter
+        # directories pre-created in Dockerfile
+        if openrouter_key := os.environ.get("OPENROUTER_API_KEY"):
+            auth_json = f'{{"openrouter": {{"type": "api", "key": "{openrouter_key}"}}}}'
+            container = container.with_new_file(
+                "/home/klaudbiusz/.local/share/opencode/auth.json",
+                auth_json,
+                owner="klaudbiusz:klaudbiusz",
+            )
 
         # mount databricks config for CLI authentication (OAuth profile)
         # container runs as 'klaudbiusz' user (see Dockerfile)
