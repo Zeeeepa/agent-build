@@ -1,33 +1,31 @@
-<div align="center">
-  <img src="logo.png" alt="app.build logo" width="150">
-</div>
-
 # app.build (agent)
+
+**⚠️ warning - the repo is not actively maintained anymore**. Existing code is provided for research purposes - feel free to fork and use in your experiments. 
 
 **app.build** is an open-source AI agent for generating production-ready applications with testing, linting and deployment setup from a single prompt. This agent relies heavily on scaffolding and extensive validation to ensure high-quality outputs.
 
-There are two generations of this agent:
+There were two generations of this agent:
 
-### v1 - Python implementation (⚠️ deprecated)
+### v1 - Python implementation
 
-Original standalone agent located in `./agent/` directory (no longer actively maintained). This version can still be used and forked, it is designed to generate CRUD applications on three stacks: (TypeScript + tRPC + Drizzle + React, Python + NiceGUI + SQLModel, PHP + Laravel). The managed service has been discontinued.
+Original standalone agent located in `./agent/` directory. It was designed to generate CRUD applications on three stacks: (TypeScript + tRPC + Drizzle + React, Python + NiceGUI + SQLModel, PHP + Laravel). The managed service has been discontinued.
 
 See [agent/README.md](agent/README.md) for setup and some usage instructions.
 
-Work report is available on [arXiv](https://arxiv.org/abs/2509.03310).
+Work report is available on [arXiv](https://arxiv.org/abs/2509.03310) (accepted at [SANER 2026](https://conf.researchr.org/home/saner-2026))
 
 ### v2 - Rust implementation 🦀
 
-It is located in `./edda/` directory (under active development). The purpose of this version is to build a more robust architecture with a focus on data applications (dashboards, analytics, data-driven tools).
+It is located in `./edda/` directory. The purpose of this version was to build a more robust architecture with a focus on data applications (dashboards, analytics, data-driven tools).
 
 Unlike the Python version, it is available not only as a standalone agent but also as a MCP powering your favorite agents (like Claude Code) or being wrapped into custom agents programmatically (see `klaudbiusz/cli/codegen.py` for the example of using with Claude Agent SDK).
+
+Some tools for bulk app generation and evaluation of this version are available under `klaudbiusz` (wrappers over Claude SDK and relevant orchestration/glue code). 
 
 ### MCP Installation
 
 **Prerequisites:**
 - OCI-compatible container runtime (Docker, OrbStack, Podman...) must be installed and running for Dagger-based sandboxed execution
-
-Try it out!
 
 ```
 curl -LsSf https://raw.githubusercontent.com/appdotbuild/agent/refs/heads/main/edda/install.sh | sh
@@ -61,10 +59,6 @@ claude "Create a Databricks app that shows daily sales by region"
 curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sudo sh
 ```
 
-Got any problems during usage? Prepare a bug report:
-```
-edda_mcp yell [optional comment]
-```
 
 ## Citation
 
