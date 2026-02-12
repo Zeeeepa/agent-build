@@ -1,0 +1,56 @@
+use crate::config::ForgeConfig;
+use dagger_sdk::DaggerConn;
+use edda_sandbox::DaggerSandbox;
+use eyre::Result;
+use std::path::Path;
+
+fn sh(cmd: &str) -> Vec<String> {
+    vec!["sh".into(), "-c".into(), cmd.into()]
+}
+
+pub async fn setup_container(
+    client: DaggerConn,
+    api_key: &str,
+    config: &ForgeConfig,
+    source_path: &Path,
+) -> Result<DaggerSandbox> {
+    let source_dir = client
+        .host()
+        .directory(source_path.to_string_lossy().to_string());
+
+    let mut ctr = client.container().from(&config.container.image);
+
+    // run setup commands (as root)
+    for cmd in &config.container.setup {
+        ctr = ctr.with_exec(sh(cmd));
+    }
+
+    // create user
+    ctr = ctr.with_exec(sh(&config.container.user_setup));
+
+    // mount source and chown to user (still running as root)
+    let user = &config.container.user;
+    let workdir = &config.project.workdir;
+    ctr = ctr
+        .with_directory(workdir, source_dir)
+        .with_exec(sh(&format!("chown -R {user}:{user} {workdir}")));
+
+    // switch to user
+    ctr = ctr.with_user(user);
+
+    // set env vars
+    for (key, value) in &config.container.env {
+        ctr = ctr.with_env_variable(key, value);
+    }
+
+    // install claude CLI (always needed)
+    ctr = ctr.with_exec(sh("curl -fsSL https://claude.ai/install.sh | bash"));
+
+    // set API key and workdir
+    ctr = ctr
+        .with_env_variable("ANTHROPIC_API_KEY", api_key)
+        .with_workdir(workdir);
+
+    let sandbox = DaggerSandbox::from_container(ctr, client);
+    Ok(sandbox)
+}
