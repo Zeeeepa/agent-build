@@ -19,7 +19,7 @@ The task list is append-only — failures add new `- [ ] Fix: ...` entries rathe
 ## Install
 
 ```bash
-cargo install --git https://github.com/neondatabase/appdotbuild-agent.git --path edda/edda_forge
+cargo install --git https://github.com/neondatabase/appdotbuild-agent.git edda_forge
 ```
 
 Requires [Dagger CLI](https://docs.dagger.io/install/) and a running Docker daemon.
