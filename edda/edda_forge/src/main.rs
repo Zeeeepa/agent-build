@@ -213,6 +213,9 @@ async fn main() -> Result<()> {
             info!(from = %old, to = %state, "state transition");
         }
 
+        // sync container before export to flatten the query chain
+        sandbox.sync().await?;
+
         match &state {
             State::Done => {
                 if export_dir {
@@ -251,7 +254,15 @@ async fn main() -> Result<()> {
         Ok(())
     })
     .await
-    .map_err(|e| eyre::eyre!("dagger error: {e:#}"))?;
+    .map_err(|e| {
+        let mut msg = format!("dagger error: {e}");
+        let mut source: &dyn std::error::Error = &e;
+        while let Some(cause) = source.source() {
+            msg.push_str(&format!("\n  caused by: {cause}"));
+            source = cause;
+        }
+        eyre::eyre!(msg)
+    })?;
 
     Ok(())
 }
