@@ -1,15 +1,14 @@
-Delegate a coding subtask to edda-forge — a sandboxed agent that loops (plan → implement → validate → review) until the code compiles and tests pass, then produces a validated patch. Think of it as delegating to an engineer who returns a tested diff.
+Delegate coding tasks to edda-forge — a sandboxed agent that loops (plan → implement → validate → review) until the code compiles and tests pass, then produces a validated patch. Think of it as delegating to an engineer who returns a tested diff.
 
-Use forge when the subtask is self-contained. Forge runs in an isolated Dagger container, so the user's working tree stays clean until the validated patch is applied.
+Use forge when each subtask is self-contained. Forge runs in an isolated Dagger container, so the user's working tree stays clean until the validated patch is applied.
 
-When multiple independent subtasks are requested, run multiple forge instances concurrently (each with a unique --output path). Apply patches sequentially after all complete.
+Aim for the maximum concurrency when possible. Decompose the problem into multiple independent subtasks that can be run in parallel. Sometimes it makes sense to run first task to create core functionality, then run dependent subtasks that build on it. But when subtasks are independent (e.g. separate utility modules, separate test files), run them concurrently to save time (each with a unique --output path). Apply patches sequentially once they are complete.
 
-The subtask is: $ARGUMENTS
+The problem is: $ARGUMENTS
 
 ## 1. Check forge.toml
 
-Look for `forge.toml` in the project root. If it exists, skip to step 2.
-
+Look for `forge.toml` in the project root.
 If it doesn't exist, detect the project type and create one.
 
 ### Concurrent runs with different validation targets
@@ -175,7 +174,7 @@ edda-forge --prompt '<the subtask>' --source . --output ./forge-<slug> --max-ret
 
 ANTHROPIC_API_KEY must be set.
 
-If running multiple forge instances concurrently, launch each in the background and wait for all to complete.
+If running multiple forge instances concurrently, launch each in the background and wait for all to complete. Forge tasks take a while, so don't check on them too frequently — give at least 5 minutes to start and get some progress.
 
 ### Prompt quality matters
 
@@ -200,9 +199,9 @@ git apply forge-<slug>.patch && rm forge-<slug>.patch
 
 ### Handling patch conflicts across concurrent runs
 
-When multiple forge instances modify overlapping files (e.g. `__init__.py`, `conftest.py`), later patches will fail to apply. This is the most common issue with concurrent forge runs.
+When multiple forge instances modify overlapping files (e.g. `__init__.py`, `conftest.py`), later patches will fail to apply. 
 
-Strategies, in order of preference:
+Solutions, in order of preference:
 
 1. **Exclude conflicting files, merge manually.** Apply the patch excluding known conflicts, then hand-merge the conflicting files:
    ```bash
@@ -217,17 +216,6 @@ Strategies, in order of preference:
    ```
 
 3. **Apply smallest/most-independent patches first.** Order by: utility modules → core logic → integration/glue code. The glue patches (which touch shared files like `__init__.py`) should go last.
-
-### Forge produced junk files
-
-Forge sometimes creates summary/documentation files (`SUMMARY.md`, `IMPLEMENTATION.md`) or extra test files at the project root. Exclude these when applying:
-```bash
-git apply --exclude='*.md' --exclude='test_*.py' forge-<slug>.patch
-```
-Or selectively include only the relevant directories:
-```bash
-git apply --include='src/*' --include='tests/*' forge-<slug>.patch
-```
 
 On forge failure: show the error and suggest the user refine the prompt or adjust forge.toml validation steps.
 
