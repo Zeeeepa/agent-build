@@ -76,12 +76,12 @@ pub fn parse_task_stats(task_list: &str) -> TaskStats {
     let mut pending_tasks = Vec::new();
     for line in task_list.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+        if let Some(rest) = trimmed.strip_prefix("- [x]").or_else(|| trimmed.strip_prefix("- [X]")) {
             done += 1;
-            done_tasks.push(trimmed[5..].trim().to_string());
-        } else if trimmed.starts_with("- [ ]") {
+            done_tasks.push(rest.trim().to_string());
+        } else if let Some(rest) = trimmed.strip_prefix("- [ ]") {
             pending += 1;
-            pending_tasks.push(trimmed[5..].trim().to_string());
+            pending_tasks.push(rest.trim().to_string());
         }
     }
     TaskStats { done, pending, done_tasks, pending_tasks }
@@ -97,7 +97,10 @@ pub async fn work(sandbox: &mut impl Sandbox, language: &str) -> Result<()> {
          Work on the unchecked tasks (- [ ]). For each task you complete, \
          update /app/tasks.md to mark it as done (- [x]). \
          You may complete multiple tasks in one go. \
-         Focus on correctness."
+         Focus on correctness.\n\n\
+         IMPORTANT: Do NOT create summary/report files (SUMMARY.md, REPORT.md, etc.), \
+         scratch test scripts at the project root, or virtual environments. \
+         Only create files that are part of the project deliverable."
     );
 
     info!("working on unchecked tasks");

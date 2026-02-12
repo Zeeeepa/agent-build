@@ -8,6 +8,34 @@ pub struct ForgeConfig {
     pub container: ContainerConfig,
     pub project: ProjectConfig,
     pub steps: StepsConfig,
+    #[serde(default)]
+    pub patch: PatchConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PatchConfig {
+    /// glob patterns to exclude from the output patch (git pathspec exclude)
+    #[serde(default = "default_patch_excludes")]
+    pub exclude: Vec<String>,
+}
+
+impl Default for PatchConfig {
+    fn default() -> Self {
+        Self {
+            exclude: default_patch_excludes(),
+        }
+    }
+}
+
+fn default_patch_excludes() -> Vec<String> {
+    vec![
+        "tasks.md".into(),
+        "*SUMMARY*.md".into(),
+        "*REPORT*.md".into(),
+        "*_venv*".into(),
+        "*venv*/**".into(),
+        "__pycache__/**".into(),
+    ]
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -25,6 +53,9 @@ pub struct ProjectConfig {
     pub language: String,
     pub source: String,
     pub workdir: String,
+    /// glob patterns to exclude when mounting source into container
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,7 +103,9 @@ impl ForgeConfig {
                 language: "rust".into(),
                 source: ".".into(),
                 workdir: "/app".into(),
+                exclude: default_excludes(),
             },
+            patch: PatchConfig::default(),
             steps: StepsConfig {
                 validate: vec![
                     ValidateStep {
@@ -109,6 +142,27 @@ impl ForgeConfig {
             bail!("steps.validate must have at least one step");
         }
         Ok(())
+    }
+}
+
+fn default_excludes() -> Vec<String> {
+    vec![
+        ".git".into(),
+        "target".into(),
+        "node_modules".into(),
+        ".venv".into(),
+        "__pycache__".into(),
+    ]
+}
+
+impl PatchConfig {
+    /// build git pathspec exclusion args: `-- . ':!pat1' ':!pat2' ...`
+    pub fn git_diff_pathspec(&self) -> String {
+        let mut spec = String::from("-- .");
+        for pat in &self.exclude {
+            spec.push_str(&format!(" ':!{pat}'"));
+        }
+        spec
     }
 }
 

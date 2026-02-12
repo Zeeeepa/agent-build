@@ -21,6 +21,10 @@ RUSTUP_HOME = "/home/forge/.rustup"
 language = "rust"
 source = "."
 workdir = "/app"
+exclude = [".git", "target"]
+
+[patch]
+exclude = ["tasks.md", "*SUMMARY*.md", "*REPORT*.md", "*venv*/**", "__pycache__/**"]
 
 [steps]
 

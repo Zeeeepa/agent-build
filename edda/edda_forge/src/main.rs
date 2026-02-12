@@ -57,8 +57,12 @@ EXAMPLES:
 )]
 struct Cli {
     /// Natural language task description for code generation
+    #[arg(long, required_unless_present = "install_claude")]
+    prompt: Option<String>,
+
+    /// Install the /forge slash command for Claude Code (~/.claude/commands/forge.md)
     #[arg(long)]
-    prompt: String,
+    install_claude: bool,
 
     /// Path to forge.toml config file
     ///
@@ -100,6 +104,19 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    if cli.install_claude {
+        return install_claude_command();
+    }
+
+    let prompt = cli.prompt.expect("--prompt is required");
+
+    if let Ok(home) = std::env::var("HOME") {
+        let cmd_path = PathBuf::from(home).join(".claude/commands/forge.md");
+        if !cmd_path.exists() {
+            eprintln!("hint: run `edda-forge --install-claude` to install the /forge slash command for Claude Code");
+        }
+    }
 
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .map_err(|_| eyre::eyre!("ANTHROPIC_API_KEY not set"))?;
@@ -156,7 +173,7 @@ async fn main() -> Result<()> {
     info!(source = %source_path.display(), "resolved source path");
 
     let output = cli.output.clone();
-    let prompt = cli.prompt.clone();
+    let prompt = prompt.clone();
     let max_retries = cli.max_retries;
     let export_dir = cli.export_dir;
 
@@ -212,7 +229,10 @@ async fn main() -> Result<()> {
                     };
                     info!(patch = %patch_path.display(), "generating patch");
                     let diff_result = sandbox
-                        .exec("git add -A && git diff --cached -- . ':!tasks.md'")
+                        .exec(&format!(
+                            "git add -A && git diff --cached {}",
+                            forge_config.patch.git_diff_pathspec()
+                        ))
                         .await?;
                     if diff_result.exit_code != 0 {
                         bail!("git diff failed: {}", diff_result.stderr);
@@ -442,6 +462,17 @@ async fn step(
 
         State::Done | State::Failed { .. } => state,
     }
+}
+
+fn install_claude_command() -> Result<()> {
+    const COMMAND: &str = include_str!("../forge-command.md");
+    let home = std::env::var("HOME").map_err(|_| eyre::eyre!("HOME not set"))?;
+    let dir = PathBuf::from(home).join(".claude/commands");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("forge.md");
+    std::fs::write(&path, COMMAND)?;
+    println!("installed /forge command → {}", path.display());
+    Ok(())
 }
 
 fn truncate_string(s: &str, max: usize) -> String {
