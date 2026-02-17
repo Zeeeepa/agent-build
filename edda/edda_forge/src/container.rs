@@ -20,6 +20,7 @@ pub async fn setup_container(
     auth: &AgentAuth,
     config: &ForgeConfig,
     source_path: &Path,
+    config_dir: &Path,
 ) -> Result<DaggerSandbox> {
     let exclude_refs: Vec<&str> = config.project.exclude.iter().map(|s| s.as_str()).collect();
     let source_dir = if exclude_refs.is_empty() {
@@ -57,6 +58,23 @@ pub async fn setup_container(
 
     let home = format!("/home/{user}");
 
+    // mount custom paths before switching to user (needs root for chown)
+    for mount in &config.mounts {
+        let host_path = mount.resolve_host_path(config_dir)?;
+        let target = &mount.container;
+        if host_path.is_file() {
+            let host_file = client.host().file(host_path.to_string_lossy().to_string());
+            ctr = ctr.with_file(target, host_file);
+        } else {
+            let host_dir = client
+                .host()
+                .directory(host_path.to_string_lossy().to_string());
+            ctr = ctr.with_directory(target, host_dir);
+        }
+        ctr = ctr.with_exec(sh(&format!("chown -R {user}:{user} {target}")));
+        tracing::info!(host = %host_path.display(), container = %target, "mounted custom path");
+    }
+
     // mount opencode auth/config before switching to user (needs root for chown)
     if matches!(&config.agent.backend, AgentBackend::OpenCode) {
         if let Some(auth_file) = &auth.opencode_auth_file {
@@ -69,7 +87,6 @@ pub async fn setup_container(
             let host_dir = client.host().directory(config_dir);
             ctr = ctr.with_directory(&target, host_dir);
         }
-        // chown the whole user home to fix ownership of mounted files
         ctr = ctr.with_exec(sh(&format!("chown -R {user}:{user} {home}")));
     }
 
@@ -89,7 +106,20 @@ pub async fn setup_container(
     // install agent CLI and configure
     match &config.agent.backend {
         AgentBackend::Claude => {
-            ctr = ctr.with_exec(sh("curl -fsSL https://claude.ai/install.sh | bash"));
+            let install_cmd = format!(
+                "set -eu; \
+                 mkdir -p {home}/.local/bin {home}/.local/share/claude/versions {home}/.claude; \
+                 lock_file={home}/.claude/install.lock; \
+                 if command -v flock >/dev/null 2>&1; then exec 9>\"$lock_file\"; flock 9; fi; \
+                 latest=$(ls -1 {home}/.local/share/claude/versions 2>/dev/null | sort -V | tail -n 1 || true); \
+                 if [ -n \"$latest\" ] && [ -x {home}/.local/share/claude/versions/$latest ]; then \
+                   ln -sf {home}/.local/share/claude/versions/$latest {home}/.local/bin/claude; \
+                   claude --version; \
+                 else \
+                   curl -fsSL https://claude.ai/install.sh | bash; \
+                 fi"
+            );
+            ctr = ctr.with_exec(sh(&install_cmd));
         }
         AgentBackend::OpenCode => {
             ctr = ctr.with_exec(sh(
